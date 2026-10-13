@@ -1,0 +1,34 @@
+# 모니터링 VM(192.168.100.107)의 /etc/prometheus/prometheus.yml로 복사해 사용한다.
+# 배포 방식: apt 패키지 + systemd (Docker Compose 아님).
+# 수집 대상은 Ansible 템플릿이 아니라 이 파일을 직접 수정해서 관리한다.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: node
+    static_configs:
+      - labels:
+          group: astra
+        targets:
+          - "192.168.100.100:9100" # astra-jenkins
+          - "192.168.100.101:9100" # astra-control-plane
+          - "192.168.100.102:9100" # astra-worker-1
+          - "192.168.100.103:9100" # astra-worker-2
+          - "192.168.100.104:9100" # astra-worker-3
+          - "192.168.100.105:9100" # astra-nfs
+          - "192.168.100.106:9100" # astra-vehicle-db
+          - "192.168.100.107:9100" # astra-monitoring (자기 자신)
+
+  # sol/terra/luna는 Tailscale IP가 아직 확정되지 않아 미포함.
+  # IP 확정되면 위 node job의 targets에 추가한다 (ansible/inventory/lab/sites.ini 참고).
+
+  # OTA 앱 메트릭 수집은 실제 배포 주소가 확인되면 추가한다 (orbit-observability#3 작업 3번).
+  # - job_name: ota-server
+  #   metrics_path: /actuator/prometheus
+  #   static_configs:
+  #     - targets: ["<OTA 앱 주소>:8081"]
