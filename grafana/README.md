@@ -56,7 +56,35 @@ curl -s -u orbit:'<비밀번호>' "http://localhost:3000/api/datasources/proxy/u
 curl -s -u orbit:'<비밀번호>' "http://localhost:3000/api/datasources/proxy/uid/<loki-uid>/loki/api/v1/labels"
 ```
 
+## 대시보드 구성 (provisioning)
+
+`grafana/provisioning/dashboards/dashboards.yaml`(provider 설정)과 같은 디렉터리의
+`load-recovery-experiment.json`(부하·복구 실험용 대시보드, orbit-observability#6)을
+VM의 provisioning 경로에 함께 복사하면, 재시작 시 Grafana가 ORBIT 폴더 아래 대시보드를
+코드로 자동 생성한다(UI에서 수동으로 Import하지 않음).
+
+대시보드 JSON은 데이터소스를 `datasources.yaml`에 고정해 둔 `uid: prometheus`/`uid: loki`로
+참조한다 — 데이터소스 provisioning이 먼저 적용돼 있어야 패널이 올바른 데이터소스에 붙는다.
+
+```bash
+sudo cp provisioning/dashboards/dashboards.yaml /etc/grafana/provisioning/dashboards/dashboards.yaml
+sudo cp provisioning/dashboards/load-recovery-experiment.json /etc/grafana/provisioning/dashboards/load-recovery-experiment.json
+sudo systemctl restart grafana-server
+```
+
+확인:
+
+```bash
+curl -s -u orbit:'<비밀번호>' http://localhost:3000/api/search?query=부하 | grep -o '"uid":"[^"]*"'
+```
+
+**이 세션에서는 검증 못함**: 이 작업 환경에서 모니터링 VM(192.168.100.107)으로의 네트워크·SSH·Tailscale
+접근이 전혀 되지 않아(health 엔드포인트 curl 타임아웃, SSH 22번 포트 타임아웃, tailscale CLI 없음),
+위 apply 절차와 패널 쿼리는 코드·문서 검토로만 작성했고 실제 VM에 적용해 패널에 데이터가 찍히는지는
+확인하지 못했다. 또한 서버·CDN 패널은 orbit-gitops#10(PR #27)이 아직 머지 전이라 Alloy 자체가
+배포되지 않은 상태라 데이터가 없는 게 정상이다 — VM·노드 패널(node_exporter)만 기존에 이미 동작 중이다.
+VM 접근이 가능해지면 각 패널을 실제 쿼리 결과로 재검증해야 한다.
+
 ## 범위 밖
 
-- 대시보드 패널 구성은 별도 작업에서 다룬다 (orbit-observability#6).
 - Alertmanager 연동은 범위 밖이다.

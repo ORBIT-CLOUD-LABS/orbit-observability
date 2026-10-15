@@ -1,0 +1,407 @@
+{
+  "uid": "orbit-load-recovery",
+  "title": "부하·복구 실험 (orbit-observability#6)",
+  "description": "서버 HPA·CPU throttling, CDN cold/warm 캐시, VM 포화, Pod 삭제·복구 판정용 대시보드. 패널별 데이터 출처와 검증 상태는 각 패널 설명을 참고 (orbit-gitops#10 Alloy 배포 전까지는 서버·CDN 패널에 실데이터가 없다).",
+  "tags": ["orbit", "phase1", "load-recovery"],
+  "timezone": "",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "type": "row",
+      "title": "서버 (OTA 서버, orbit namespace)",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 1 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Replica: desired / available / ready",
+      "description": "kube_deployment_* 는 deployment label로 직접 구분. ready는 kube_pod_status_ready에 deployment/app label이 없어 pod 이름 접두사(orbit-server-)로 식별 — kube-state-metrics pods collector의 기본 동작이며, kube-state-metrics#values.yaml의 metricLabelsAllowlist를 켜지 않는 한 바꿀 수 없다.",
+      "gridPos": { "x": 0, "y": 1, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "kube_deployment_spec_replicas{namespace=\"orbit\", deployment=\"orbit-server\"}",
+          "legendFormat": "desired"
+        },
+        {
+          "refId": "B",
+          "expr": "kube_deployment_status_replicas_available{namespace=\"orbit\", deployment=\"orbit-server\"}",
+          "legendFormat": "available"
+        },
+        {
+          "refId": "C",
+          "expr": "sum(kube_pod_status_ready{namespace=\"orbit\", condition=\"true\", pod=~\"orbit-server-.*\"})",
+          "legendFormat": "ready"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "HPA 현재 / 목표 사용률",
+      "description": "Phase1 HPA는 CPU 기준 단일 지표라 metric_name=\"cpu\" 시계열 하나만 예상된다. orbit-server#.. CPU request/limit 확정 전까지는 목표 사용률(spec_target_metric) 자체가 임시값일 수 있다.",
+      "gridPos": { "x": 12, "y": 1, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percent" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "kube_horizontalpodautoscaler_status_current_metrics{namespace=\"orbit\"}",
+          "legendFormat": "current {{metric_name}}"
+        },
+        {
+          "refId": "B",
+          "expr": "kube_horizontalpodautoscaler_spec_target_metric{namespace=\"orbit\"}",
+          "legendFormat": "target {{metric_name}}"
+        },
+        {
+          "refId": "C",
+          "expr": "kube_horizontalpodautoscaler_status_current_replicas{namespace=\"orbit\"}",
+          "legendFormat": "current replicas"
+        },
+        {
+          "refId": "D",
+          "expr": "kube_horizontalpodautoscaler_status_desired_replicas{namespace=\"orbit\"}",
+          "legendFormat": "desired replicas"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Pod별 CPU 사용량 vs request / limit",
+      "description": "container_cpu_usage_seconds_total(cAdvisor)과 kube_pod_container_resource_requests/limits(resource=\"cpu\")를 같은 패널에 겹쳐 그린다. container!=\"\" 로 cAdvisor의 pod 전체 합산(빈 container label) 가짜 시계열을 제외한다.",
+      "gridPos": { "x": 0, "y": 9, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"orbit\", pod=~\"orbit-server-.*\", container!=\"\", container!=\"POD\"}[5m]))",
+          "legendFormat": "{{pod}} usage"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (pod) (kube_pod_container_resource_requests{namespace=\"orbit\", pod=~\"orbit-server-.*\", resource=\"cpu\"})",
+          "legendFormat": "{{pod}} request"
+        },
+        {
+          "refId": "C",
+          "expr": "sum by (pod) (kube_pod_container_resource_limits{namespace=\"orbit\", pod=~\"orbit-server-.*\", resource=\"cpu\"})",
+          "legendFormat": "{{pod}} limit"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Pod별 메모리 사용량 vs request / limit",
+      "description": "container_memory_working_set_bytes(cAdvisor)과 kube_pod_container_resource_requests/limits(resource=\"memory\").",
+      "gridPos": { "x": 12, "y": 9, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (pod) (container_memory_working_set_bytes{namespace=\"orbit\", pod=~\"orbit-server-.*\", container!=\"\", container!=\"POD\"})",
+          "legendFormat": "{{pod}} usage"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (pod) (kube_pod_container_resource_requests{namespace=\"orbit\", pod=~\"orbit-server-.*\", resource=\"memory\"})",
+          "legendFormat": "{{pod}} request"
+        },
+        {
+          "refId": "C",
+          "expr": "sum by (pod) (kube_pod_container_resource_limits{namespace=\"orbit\", pod=~\"orbit-server-.*\", resource=\"memory\"})",
+          "legendFormat": "{{pod}} limit"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Pod별 CPU throttling 비율",
+      "description": "container_cpu_cfs_throttled_periods_total ÷ container_cpu_cfs_periods_total (issue #6에서 지정한 정의 그대로). 서버 Pod가 CPU limit에 막혀 병목이었는지 판단하는 근거.",
+      "gridPos": { "x": 0, "y": 17, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (pod) (rate(container_cpu_cfs_throttled_periods_total{namespace=\"orbit\", pod=~\"orbit-server-.*\", container!=\"\", container!=\"POD\"}[5m])) / sum by (pod) (rate(container_cpu_cfs_periods_total{namespace=\"orbit\", pod=~\"orbit-server-.*\", container!=\"\", container!=\"POD\"}[5m]))",
+          "legendFormat": "{{pod}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "JVM heap / non-heap",
+      "description": "jvm_memory_used_bytes를 area(heap/nonheap)별로 합산. 메모리 풀 단위(id label)까지는 labelkeep에서 보지 않는다(카디널리티 때문에 제외).",
+      "gridPos": { "x": 12, "y": 17, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (pod, area) (jvm_memory_used_bytes{namespace=\"orbit\", pod=~\"orbit-server-.*\"})",
+          "legendFormat": "{{pod}} {{area}}"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Hikari pool 활성 / 대기 연결 수",
+      "description": "Spring Boot가 HikariDataSource를 자동으로 Micrometer에 바인딩해 노출하는 기본 메트릭(hikaricp_connections_*). pool 이름은 애플리케이션당 하나뿐이라 label로 구분하지 않는다.",
+      "gridPos": { "x": 0, "y": 25, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (pod) (hikaricp_connections_active{namespace=\"orbit\", pod=~\"orbit-server-.*\"})",
+          "legendFormat": "{{pod}} active"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (pod) (hikaricp_connections_pending{namespace=\"orbit\", pod=~\"orbit-server-.*\"})",
+          "legendFormat": "{{pod}} pending"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Hikari 연결 획득 평균 대기 시간",
+      "description": "hikaricp_connections_acquire_seconds_sum/_count의 rate 비율(평균). DB가 포화돼 연결 획득이 느려지는지 확인.",
+      "gridPos": { "x": 12, "y": 25, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (pod) (rate(hikaricp_connections_acquire_seconds_sum{namespace=\"orbit\", pod=~\"orbit-server-.*\"}[5m])) / sum by (pod) (rate(hikaricp_connections_acquire_seconds_count{namespace=\"orbit\", pod=~\"orbit-server-.*\"}[5m]))",
+          "legendFormat": "{{pod}} avg acquire time"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "API 요청률 / 오류율 (status별)",
+      "description": "http_server_requests_seconds_count(Spring Boot Actuator/Micrometer 기본 메트릭)를 status별로 합산. uri는 카디널리티 때문에 label로 보지 않는다 — 엔드포인트별 분석이 필요하면 별도 패널에서 uri를 추가해야 한다.",
+      "gridPos": { "x": 0, "y": 33, "w": 24, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (status) (rate(http_server_requests_seconds_count{namespace=\"orbit\", pod=~\"orbit-server-.*\"}[5m]))",
+          "legendFormat": "status {{status}}"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(http_server_requests_seconds_count{namespace=\"orbit\", pod=~\"orbit-server-.*\", status=~\"5..\"}[5m])) / sum(rate(http_server_requests_seconds_count{namespace=\"orbit\", pod=~\"orbit-server-.*\"}[5m]))",
+          "legendFormat": "5xx 비율"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "API P95 지연시간",
+      "description": "http_server_requests_seconds_bucket의 le label로 histogram_quantile 계산. orbit-server application.yml의 management.metrics.distribution.percentiles-histogram.http.server.requests=true로 bucket이 켜져 있음을 코드로 확인(2026-10-16). le label이 labelkeep에서 빠지면 이 패널 전체가 깨진다(orbit-gitops#10 PR #27에서 수정).",
+      "gridPos": { "x": 0, "y": 41, "w": 24, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_requests_seconds_bucket{namespace=\"orbit\", pod=~\"orbit-server-.*\"}[5m])))",
+          "legendFormat": "p95"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "CDN (Origin·Edge, orbit namespace)",
+      "gridPos": { "x": 0, "y": 49, "w": 24, "h": 1 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Edge 요청률 / HIT·MISS 비율",
+      "description": "Loki LogQL. Edge·Origin에는 kube-state-metrics 같은 label 보강이 없고 nginx 메트릭 exporter도 따로 없어, edge.conf의 JSON access log(stdout, cache 필드 포함)를 Alloy가 Loki로 보낸 것을 직접 파싱해서 쓴다. pod 이름 접두사(cdn-edge-)로 Edge를 식별(Loki stream label, orbit-gitops 워크로드 기준 고정값).",
+      "gridPos": { "x": 0, "y": 50, "w": 12, "h": 8 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (cache) (rate({namespace=\"orbit\", pod=~\"cdn-edge-.*\"} | json | __error__=\"\" [1m]))",
+          "legendFormat": "{{cache}}"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Edge 전송 byte",
+      "description": "edge_json log_format의 bytes 필드(body_bytes_sent) 합. 캐시가 Origin 요청을 줄이는지 판단할 때 Origin 전송량과 같이 본다.",
+      "gridPos": { "x": 12, "y": 50, "w": 12, "h": 8 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate({namespace=\"orbit\", pod=~\"cdn-edge-.*\"} | json | __error__=\"\" | unwrap bytes [1m]))",
+          "legendFormat": "edge bytes/s"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Origin 요청률 / 전송 byte",
+      "description": "origin_json log_format. Edge 캐시가 커질수록 Origin 요청률·byte가 줄어야 캐시 효과가 있다고 판단한다(issue #6 CDN 화면 정의).",
+      "gridPos": { "x": 0, "y": 58, "w": 12, "h": 8 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate({namespace=\"orbit\", pod=~\"cdn-origin-.*\"} | json | __error__=\"\" [1m]))",
+          "legendFormat": "origin req/s"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate({namespace=\"orbit\", pod=~\"cdn-origin-.*\"} | json | __error__=\"\" | unwrap bytes [1m]))",
+          "legendFormat": "origin bytes/s"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "logs",
+      "title": "CDN 오류 응답 access log (status != 200/204)",
+      "description": "Edge·Origin 중 status가 200대가 아닌 요청의 원본 로그 라인. 캐시 lock timeout, upstream 오류 등 원인 파악용.",
+      "gridPos": { "x": 12, "y": 58, "w": 12, "h": 8 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{namespace=\"orbit\", pod=~\"cdn-(edge|origin)-.*\"} | json | __error__=\"\" | status != `200` and status != `204`"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "VM·노드 (node_exporter)",
+      "gridPos": { "x": 0, "y": 66, "w": 24, "h": 1 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "VM·노드 CPU 사용률",
+      "description": "prometheus.yml의 node job(5s 간격)을 직접 scrape — Alloy·labelkeep을 거치지 않아 label 제한이 없다. instance 매핑: .1=astra 호스트, .100=jenkins, .101=control-plane, .102~104=worker1~3, .105=nfs, .106=vehicle-db, .107=monitoring.",
+      "gridPos": { "x": 0, "y": 67, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percent" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 - (avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)",
+          "legendFormat": "{{instance}}"
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "VM·노드 메모리 사용률",
+      "gridPos": { "x": 12, "y": 67, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percent" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100",
+          "legendFormat": "{{instance}}"
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "VM·노드 디스크 I/O",
+      "description": "node_disk_*_bytes_total. astra-nfs(.105)는 펌웨어 원본 쓰기, astra-vehicle-db(.106)는 DB I/O를 본다.",
+      "gridPos": { "x": 0, "y": 75, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "Bps" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (instance) (rate(node_disk_read_bytes_total[5m]))",
+          "legendFormat": "{{instance}} read"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (instance) (rate(node_disk_written_bytes_total[5m]))",
+          "legendFormat": "{{instance}} write"
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "DB VM(astra-vehicle-db) CPU — 서버 화면과 같은 시간축 참고용",
+      "description": "서버 replica·처리량과 겹쳐 봐야 하는 값이라 서버 화면에도 같은 패널을 둔다(issue #6 명시 사항). 쿼리는 위 VM CPU 패널과 동일하되 instance를 DB VM 하나로 고정.",
+      "gridPos": { "x": 12, "y": 75, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percent" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 - (avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\", instance=\"192.168.100.106:9100\"}[5m])) * 100)",
+          "legendFormat": "astra-vehicle-db"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Pod 삭제·재생성",
+      "gridPos": { "x": 0, "y": 83, "w": 24, "h": 1 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "Pod 재시작 횟수 (삭제·재생성 proxy)",
+      "description": "kube-state-metrics의 collectors를 [deployments, horizontalpodautoscalers, pods]로만 제한해뒀고 events collector는 켜지 않았다(orbit-gitops#10/platform/kube-state-metrics/values.yaml) — 즉 실제 Kubernetes Event 객체(Pod 삭제·스케줄 등)는 수집하지 않는다. increase(kube_pod_container_status_restarts_total)를 삭제·재생성 시점의 근사값으로 쓴다. 정확한 이벤트 타임라인이 필요해지면 별도로 events collector를 켜는 작업이 필요하다(지금은 범위 밖).",
+      "gridPos": { "x": 0, "y": 84, "w": 24, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (namespace, pod, container) (increase(kube_pod_container_status_restarts_total{namespace=\"orbit\"}[5m]))",
+          "legendFormat": "{{pod}}/{{container}}"
+        }
+      ]
+    }
+  ]
+}

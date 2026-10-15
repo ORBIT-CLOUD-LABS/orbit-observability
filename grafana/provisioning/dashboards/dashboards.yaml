@@ -1,0 +1,13 @@
+# /etc/grafana/provisioning/dashboards/dashboards.yaml 로 복사해 사용한다 (grafana/README.md 참고).
+# 같은 디렉터리의 .json 파일들도 함께 /etc/grafana/provisioning/dashboards/ 에 복사한다.
+apiVersion: 1
+
+providers:
+  - name: orbit
+    orgId: 1
+    folder: ORBIT
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards
