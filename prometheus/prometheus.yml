@@ -10,11 +10,14 @@ scrape_configs:
     static_configs:
       - targets: ["localhost:9090"]
 
+  # HPA scale-out/in 시점을 놓치지 않기 위해 global(15s)보다 촘촘한 5s로 수집한다 (orbit-observability#7).
   - job_name: node
+    scrape_interval: 5s
     static_configs:
       - labels:
           group: astra
         targets:
+          - "192.168.100.1:9100"   # astra 호스트 (하이퍼바이저, VM망쪽 IP)
           - "192.168.100.100:9100" # astra-jenkins
           - "192.168.100.101:9100" # astra-control-plane
           - "192.168.100.102:9100" # astra-worker-1
