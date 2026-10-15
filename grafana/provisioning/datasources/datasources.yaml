@@ -1,0 +1,16 @@
+# /etc/grafana/provisioning/datasources/datasources.yaml 로 복사해 사용한다 (grafana/README.md 참고).
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://localhost:9090
+    isDefault: true
+    editable: false
+
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://localhost:3100
+    editable: false
