@@ -78,12 +78,22 @@ sudo systemctl restart grafana-server
 curl -s -u orbit:'<비밀번호>' http://localhost:3000/api/search?query=부하 | grep -o '"uid":"[^"]*"'
 ```
 
-**이 세션에서는 검증 못함**: 이 작업 환경에서 모니터링 VM(192.168.100.107)으로의 네트워크·SSH·Tailscale
-접근이 전혀 되지 않아(health 엔드포인트 curl 타임아웃, SSH 22번 포트 타임아웃, tailscale CLI 없음),
-위 apply 절차와 패널 쿼리는 코드·문서 검토로만 작성했고 실제 VM에 적용해 패널에 데이터가 찍히는지는
-확인하지 못했다. 또한 서버·CDN 패널은 orbit-gitops#10(PR #27)이 아직 머지 전이라 Alloy 자체가
-배포되지 않은 상태라 데이터가 없는 게 정상이다 — VM·노드 패널(node_exporter)만 기존에 이미 동작 중이다.
-VM 접근이 가능해지면 각 패널을 실제 쿼리 결과로 재검증해야 한다.
+**검증 완료 (2026-10-15)**: astra를 경유한 SSH 로컬 포트포워딩(`-L 3000:localhost:3000`)으로 모니터링
+VM에 접속해 위 apply 절차를 실제로 적용하고 확인했다.
+
+- 적용 중 `grafana-server`가 crash-loop에 빠졌다. 원인은 이전에 uid 없이 provisioning됐던
+  Prometheus/Loki 데이터소스가 `grafana.db`에 자동생성 uid(`PBFA97CFB590B2093`, `P8E80F9AEF21F6940`)로
+  이미 들어있던 상태에서, 새 provisioning이 고정 uid(`prometheus`/`loki`)로 데이터소스를 찾다가
+  "Datasource provisioning error: data source not found"로 fatal 처리되어 5초 간격으로 재시작을
+  반복한 것이었다. `sqlite3 /var/lib/grafana/grafana.db "DELETE FROM data_source WHERE id IN (...);"`로
+  기존 row를 지우고 재시작하자 정상화됐다. 같은 증상(provisioning에서 고정 uid를 쓰도록 바꾼 뒤
+  crash-loop)을 겪는다면 동일한 방법으로 해결한다.
+- `/api/datasources`로 Prometheus/Loki가 고정 uid(`prometheus`/`loki`)로 등록된 것을 확인했다.
+- Prometheus 프록시 쿼리(`up`)로 node_exporter 9대의 실제 데이터를 확인했다.
+- 대시보드(`uid: orbit-load-recovery`)가 ORBIT 폴더에 생성된 것을 Grafana UI에서 직접 확인했다.
+  VM·노드 패널은 실제 데이터가 찍히고, 서버·CDN·Pod 패널은 Alloy·kube-state-metrics가 아직
+  배포 전(orbit-gitops#10/PR #27 미머지)이라 에러 없이 "No data"로 비어있다 — 현재는 정상인 상태다.
+  두 PR이 머지된 뒤 서버·CDN·Pod 패널을 재확인해야 한다.
 
 ## 범위 밖
 
