@@ -390,16 +390,16 @@
     {
       "id": 19,
       "type": "timeseries",
-      "title": "Pod 재시작 횟수 (삭제·재생성 proxy)",
-      "description": "kube-state-metrics의 collectors를 [deployments, horizontalpodautoscalers, pods]로만 제한해뒀고 events collector는 켜지 않았다(orbit-gitops#10/platform/kube-state-metrics/values.yaml) — 즉 실제 Kubernetes Event 객체(Pod 삭제·스케줄 등)는 수집하지 않는다. increase(kube_pod_container_status_restarts_total)를 삭제·재생성 시점의 근사값으로 쓴다. 정확한 이벤트 타임라인이 필요해지면 별도로 events collector를 켜는 작업이 필요하다(지금은 범위 밖).",
+      "title": "Pod 나이 (kubectl delete pod 삭제·재생성 시 0으로 리셋)",
+      "description": "복구 실험 방식이 `kubectl delete pod`(Pod 객체 자체를 지우고 Deployment가 새 Pod를 띄움)로 확정됨에 따라, 컨테이너 크래시 재시작만 잡는 kube_pod_container_status_restarts_total 대신 kube_pod_start_time 기반으로 바꿨다. time() - kube_pod_start_time은 Pod 객체가 새로 생성될 때마다 0으로 리셋되는 '나이'이므로, 삭제 시점에 기존 pod 이름의 선이 끊기고 새 pod 이름의 선이 0부터 다시 시작하는 걸로 삭제·재생성 시점을 읽는다. kube-state-metrics의 pods collector에서 수집되며 events collector는 켜지 않았다(orbit-gitops#10/platform/kube-state-metrics/values.yaml) — 정확한 이벤트 타임라인이 필요해지면 별도로 events collector를 켜는 작업이 필요하다(지금은 범위 밖).",
       "gridPos": { "x": 0, "y": 84, "w": 24, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "fieldConfig": { "defaults": { "unit": "s", "min": 0 }, "overrides": [] },
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (namespace, pod, container) (increase(kube_pod_container_status_restarts_total{namespace=\"orbit\"}[5m]))",
-          "legendFormat": "{{pod}}/{{container}}"
+          "expr": "time() - kube_pod_start_time{namespace=\"orbit\"}",
+          "legendFormat": "{{pod}}"
         }
       ]
     }
