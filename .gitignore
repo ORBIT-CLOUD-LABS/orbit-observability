@@ -1,1 +1,4 @@
 .DS_Store
+
+# k6 실행 결과 (k6/scripts/run.sh). 결과 문서는 orbit 레포에 정리한다.
+k6/runs/
