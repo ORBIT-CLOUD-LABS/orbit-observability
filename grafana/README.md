@@ -56,7 +56,45 @@ curl -s -u orbit:'<비밀번호>' "http://localhost:3000/api/datasources/proxy/u
 curl -s -u orbit:'<비밀번호>' "http://localhost:3000/api/datasources/proxy/uid/<loki-uid>/loki/api/v1/labels"
 ```
 
+## 대시보드 구성 (provisioning)
+
+`grafana/provisioning/dashboards/dashboards.yaml`(provider 설정)과 같은 디렉터리의
+`load-recovery-experiment.json`(부하·복구 실험용 대시보드, orbit-observability#6)을
+VM의 provisioning 경로에 함께 복사하면, 재시작 시 Grafana가 ORBIT 폴더 아래 대시보드를
+코드로 자동 생성한다(UI에서 수동으로 Import하지 않음).
+
+대시보드 JSON은 데이터소스를 `datasources.yaml`에 고정해 둔 `uid: prometheus`/`uid: loki`로
+참조한다 — 데이터소스 provisioning이 먼저 적용돼 있어야 패널이 올바른 데이터소스에 붙는다.
+
+```bash
+sudo cp provisioning/dashboards/dashboards.yaml /etc/grafana/provisioning/dashboards/dashboards.yaml
+sudo cp provisioning/dashboards/load-recovery-experiment.json /etc/grafana/provisioning/dashboards/load-recovery-experiment.json
+sudo systemctl restart grafana-server
+```
+
+확인:
+
+```bash
+curl -s -u orbit:'<비밀번호>' http://localhost:3000/api/search?query=부하 | grep -o '"uid":"[^"]*"'
+```
+
+**검증 완료 (2026-10-15)**: astra를 경유한 SSH 로컬 포트포워딩(`-L 3000:localhost:3000`)으로 모니터링
+VM에 접속해 위 apply 절차를 실제로 적용하고 확인했다.
+
+- 적용 중 `grafana-server`가 crash-loop에 빠졌다. 원인은 이전에 uid 없이 provisioning됐던
+  Prometheus/Loki 데이터소스가 `grafana.db`에 자동생성 uid(`PBFA97CFB590B2093`, `P8E80F9AEF21F6940`)로
+  이미 들어있던 상태에서, 새 provisioning이 고정 uid(`prometheus`/`loki`)로 데이터소스를 찾다가
+  "Datasource provisioning error: data source not found"로 fatal 처리되어 5초 간격으로 재시작을
+  반복한 것이었다. `sqlite3 /var/lib/grafana/grafana.db "DELETE FROM data_source WHERE id IN (...);"`로
+  기존 row를 지우고 재시작하자 정상화됐다. 같은 증상(provisioning에서 고정 uid를 쓰도록 바꾼 뒤
+  crash-loop)을 겪는다면 동일한 방법으로 해결한다.
+- `/api/datasources`로 Prometheus/Loki가 고정 uid(`prometheus`/`loki`)로 등록된 것을 확인했다.
+- Prometheus 프록시 쿼리(`up`)로 node_exporter 9대의 실제 데이터를 확인했다.
+- 대시보드(`uid: orbit-load-recovery`)가 ORBIT 폴더에 생성된 것을 Grafana UI에서 직접 확인했다.
+  VM·노드 패널은 실제 데이터가 찍히고, 서버·CDN·Pod 패널은 Alloy·kube-state-metrics가 아직
+  배포 전(orbit-gitops#10/PR #27 미머지)이라 에러 없이 "No data"로 비어있다 — 현재는 정상인 상태다.
+  두 PR이 머지된 뒤 서버·CDN·Pod 패널을 재확인해야 한다.
+
 ## 범위 밖
 
-- 대시보드 패널 구성은 별도 작업에서 다룬다 (orbit-observability#6).
 - Alertmanager 연동은 범위 밖이다.

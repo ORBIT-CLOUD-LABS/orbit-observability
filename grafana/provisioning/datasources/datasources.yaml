@@ -4,6 +4,7 @@ apiVersion: 1
 datasources:
   - name: Prometheus
     type: prometheus
+    uid: prometheus # grafana/dashboards의 대시보드 JSON이 이 uid를 고정값으로 참조한다 (orbit-observability#6).
     access: proxy
     url: http://localhost:9090
     isDefault: true
@@ -11,6 +12,7 @@ datasources:
 
   - name: Loki
     type: loki
+    uid: loki # grafana/dashboards의 대시보드 JSON이 이 uid를 고정값으로 참조한다 (orbit-observability#6).
     access: proxy
     url: http://192.168.100.107:3100 # Loki가 loopback이 아닌 이 IP에만 바인딩되어 있어 localhost로는 연결되지 않는다.
     editable: false
