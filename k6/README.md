@@ -67,12 +67,27 @@ JUMP_HOST= taskset -c 10,11 k6/scripts/run.sh server-hpa -e STAGES=... -e VEHICL
 | `CDN_URL` | 없음 | smoke | 매니페스트 `downloadUrl` 의 주소 부분을 바꿀 때 (터널 등) |
 | `RUN_ID` | `<UTC 시각>-<시나리오>` | 공통 | 실행 구분값. 결과 디렉터리 이름. Prometheus `run_id` label 은 `server-hpa` 만 붙인다 (smoke 는 없음) |
 | `FIRMWARE_SIZE_MB` | `1` | smoke | 시험 파일 크기 |
-| `STAGES` | `10:1m,50:2m,100:3m,100:3m,10:2m` | server-hpa | `요청률(iteration/s):유지 시간` 목록 |
+| `STAGES` | `10:1m,50:2m,100:3m,100:3m,10:2m` | server-hpa | `목표 요청률(iteration/s):시간` 목록. 앞 단계 값에서 목표까지 그 시간 동안 직선으로 올린다 (아래 단계 유지) |
 | `VEHICLES` | `100` | server-hpa | 차량 수 = 최대 VU. VU 하나가 차량 하나를 맡는다 |
 | `UPDATE_RATIO` | `0.1` | server-hpa | 업데이트 대상 비율. 대상이면 매니페스트까지 호출 |
 | `JUMP_HOST` | `orbit-astra` | run.sh, cleanup.sh | 클러스터 VM 에 접속할 때 거치는 호스트. ASTRA 호스트에서 실행하면 빈 값(`JUMP_HOST=`) |
 | `NO_PROM` | `0` | run.sh | `1` 이면 Prometheus 로 보내지 않는다 |
 | `PROM_RW_URL` | `http://192.168.100.107:9090/api/v1/write` | run.sh | remote write 주소 |
+
+### 단계 유지
+
+`server-hpa` 는 `ramping-arrival-rate` 라 `STAGES` 의 각 값은 "그 값까지 직선으로 올리기"다. 유지 구간이 필요하면 같은 값을 한 번 더 적는다.
+
+```bash
+# 연속 증가: 20 → 40 → 80 사이를 계속 올린다. 한계 범위를 빠르게 찾을 때
+-e STAGES=5:2m,20:1m,40:1m,80:1m
+
+# 계단: 20초 동안 올리고 2분 유지. 한계값(T_pod·T_db)을 판정할 때
+-e STAGES=5:30s,5:1m,80:20s,80:2m,120:20s,120:2m,160:20s,160:2m
+```
+
+- 처음 `5:30s,5:1m` 은 JIT warm-up 이라 판정에서 뺀다
+- 서버·cAdvisor 지표는 30초마다 수집되므로 단계 판정은 2분 창(`[2m]`)으로 본다. 1분 창은 샘플이 2개뿐이라 값이 튄다
 
 ## 결과
 
