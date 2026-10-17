@@ -8,12 +8,32 @@
   "version": 1,
   "refresh": "30s",
   "time": { "from": "now-6h", "to": "now" },
+  "annotations": {
+    "list": [
+      {
+        "name": "HPA scale",
+        "datasource": { "type": "loki", "uid": "loki" },
+        "enable": true,
+        "iconColor": "orange",
+        "expr": "{namespace=\"orbit\", job=\"k8s-events\"} |= \"SuccessfulRescale\"",
+        "textFormat": "{{__line__}}"
+      },
+      {
+        "name": "orbit-server Pod 생성·삭제·probe 실패",
+        "datasource": { "type": "loki", "uid": "loki" },
+        "enable": true,
+        "iconColor": "purple",
+        "expr": "{namespace=\"orbit\", job=\"k8s-events\"} |= \"orbit-server-\" |~ \"reason=(Started|Killing|Unhealthy)\"",
+        "textFormat": "{{__line__}}"
+      }
+    ]
+  },
   "templating": {
     "list": [
       {
         "name": "run_id",
         "label": "k6 run_id",
-        "description": "k6 패널에서 볼 실행. run.sh 가 붙이는 run_id label (server-hpa 만 붙고 smoke 는 없다).",
+        "description": "k6 패널에서 볼 실행. run.sh 가 붙이는 run_id label (server-hpa·smoke-e2e).",
         "type": "query",
         "datasource": { "type": "prometheus", "uid": "prometheus" },
         "query": { "query": "label_values(k6_iterations_total, run_id)", "refId": "run_id" },
