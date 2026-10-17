@@ -8,6 +8,24 @@
   "version": 1,
   "refresh": "30s",
   "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "run_id",
+        "label": "k6 run_id",
+        "description": "k6 패널에서 볼 실행. run.sh 가 붙이는 run_id label (server-hpa 만 붙고 smoke 는 없다).",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": { "query": "label_values(k6_iterations_total, run_id)", "refId": "run_id" },
+        "refresh": 2,
+        "sort": 2,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
   "panels": [
     {
       "type": "row",
@@ -390,6 +408,87 @@
           "refId": "A",
           "expr": "time() - kube_pod_start_time{namespace=\"orbit\"}",
           "legendFormat": "{{pod}}"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "부하 발생기 (k6)",
+      "gridPos": { "x": 0, "y": 92, "w": 24, "h": 1 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "k6 보낸 요청률 (name별)",
+      "description": "k6 가 실제로 보낸 차량 API 요청률. fixture 요청(name=fixture:*)은 측정에서 빼므로 check-in·manifest 만 본다. iterations 는 체크인 1회(+업데이트 대상이면 매니페스트) 단위. 서버 API 요청률 패널과 비교해 서버가 받은 양과 맞는지 본다. k6 는 5초마다 보내므로 rate 구간은 30s.",
+      "gridPos": { "x": 0, "y": 93, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (name) (rate(k6_http_reqs_total{run_id=~\"$run_id\", name=~\"check-in|manifest\"}[30s]))",
+          "legendFormat": "{{name}}"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(k6_iterations_total{run_id=~\"$run_id\"}[30s]))",
+          "legendFormat": "iterations"
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "k6 P95 응답 시간 (name별)",
+      "description": "k6 가 클라이언트 쪽에서 잰 P95 (네트워크 경로 포함). run.sh 가 K6_PROMETHEUS_RW_TREND_STATS 로 p95 를 gauge 로 보낸다. 같은 name 에 status 가 여러 개면 그중 최댓값. 실행이 끝나도 마지막 값이 몇 분 남으므로 실행 구간만 본다.",
+      "gridPos": { "x": 12, "y": 93, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (name) (k6_http_req_duration_p95{run_id=~\"$run_id\", name=~\"check-in|manifest\"})",
+          "legendFormat": "{{name}} p95"
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "k6 실패 요청률 (name별)",
+      "description": "k6 기준 실패(expected_response=false) 요청률. 실패가 한 번도 없으면 시계열이 없어 No data 로 보이며 이는 0 을 뜻한다. 서버 Pod 삭제 실험에서 실패 요청 수를 셀 때 쓴다 (구간 합계는 increase 로 따로 조회).",
+      "gridPos": { "x": 0, "y": 101, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (name, status) (rate(k6_http_reqs_total{run_id=~\"$run_id\", name=~\"check-in|manifest\", expected_response=\"false\"}[30s]))",
+          "legendFormat": "{{name}} {{status}}"
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "type": "timeseries",
+      "title": "k6 발생기 상태: VU·dropped iterations",
+      "description": "부하 발생기가 한계였는지 판단한다. dropped iterations 가 0 보다 크면 VU 가 모자라 목표 요청률을 못 낸 것이므로 그 구간 결과는 서버 한계로 해석하지 않는다. dropped 는 한 번도 발생하지 않으면 시계열이 없어 or vector(0) 으로 0 을 채운다. 발생기 CPU 는 VM·노드 화면의 ASTRA 호스트(192.168.100.1) CPU 로 본다.",
+      "gridPos": { "x": 12, "y": 101, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(k6_vus{run_id=~\"$run_id\"})",
+          "legendFormat": "VU"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(k6_dropped_iterations_total{run_id=~\"$run_id\"}[30s])) or vector(0)",
+          "legendFormat": "dropped iterations/s"
         }
       ]
     }
