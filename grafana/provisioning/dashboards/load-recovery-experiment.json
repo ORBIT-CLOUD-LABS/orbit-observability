@@ -519,6 +519,43 @@
           "legendFormat": "dropped iterations/s"
         }
       ]
+    },
+    {
+      "type": "row",
+      "title": "서버 로그 (Loki)",
+      "gridPos": { "x": 0, "y": 109, "w": 24, "h": 1 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 25,
+      "type": "timeseries",
+      "title": "서버 WARN·ERROR 로그 수 (Pod별)",
+      "description": "orbit-server 는 정상 요청마다 로그를 남기지 않고, 문제가 생길 때 WARN·ERROR 를 남긴다 (예: DB 연결 획득 지연 시 'DataSourceHealthIndicator (db) took 20008ms'). 0 이 아니면 오른쪽 로그 목록에서 내용을 본다. Loki 로그 줄 수라 지표가 아닌 참고값이다.",
+      "gridPos": { "x": 0, "y": 110, "w": 12, "h": 8 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "fillOpacity": 60 } }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (pod, level) (count_over_time({namespace=\"orbit\", app=\"orbit-server\"} |~ `^\\S+\\s+(WARN|ERROR)\\s` | regexp `^\\S+\\s+(?P<level>WARN|ERROR)\\s` [1m]))",
+          "legendFormat": "{{pod}} {{level}}"
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "type": "logs",
+      "title": "서버 WARN·ERROR 로그",
+      "description": "orbit-server 의 WARN·ERROR 로그 원문. 왼쪽 그래프와 같은 시간축에서 원인(DB 지연, 예외 stack trace 등)을 확인한다.",
+      "gridPos": { "x": 12, "y": 110, "w": 12, "h": 8 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{namespace=\"orbit\", app=\"orbit-server\"} |~ `^\\S+\\s+(WARN|ERROR)\\s`"
+        }
+      ]
     }
   ]
 }
