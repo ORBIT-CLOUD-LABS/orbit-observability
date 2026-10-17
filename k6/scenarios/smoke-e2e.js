@@ -18,6 +18,8 @@ export const options = {
   setupTimeout: '2m',
   // URL 에 차량 ID 가 들어가므로 url tag 를 남기지 않는다.
   systemTags: ['status', 'method', 'name', 'group', 'check', 'error', 'error_code', 'scenario', 'expected_response'],
+  // Prometheus 에서 실행을 구분하는 label. server-hpa 와 같은 이름을 써서 대시보드 run_id 변수로 고를 수 있게 한다.
+  tags: { run_id: config.runId, experiment: 'smoke-e2e' },
   thresholds: {
     // 하나라도 실패하면 k6 가 0 이 아닌 코드로 끝난다.
     checks: ['rate==1'],

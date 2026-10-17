@@ -65,7 +65,7 @@ JUMP_HOST= taskset -c 10,11 k6/scripts/run.sh server-hpa -e STAGES=... -e VEHICL
 | --- | --- | --- | --- |
 | `SERVER_URL` | `http://192.168.100.102:30080` | 공통 | 서버 NodePort |
 | `CDN_URL` | 없음 | smoke | 매니페스트 `downloadUrl` 의 주소 부분을 바꿀 때 (터널 등) |
-| `RUN_ID` | `<UTC 시각>-<시나리오>` | 공통 | 실행 구분값. 결과 디렉터리 이름. Prometheus `run_id` label 은 `server-hpa` 만 붙인다 (smoke 는 없음) |
+| `RUN_ID` | `<UTC 시각>-<시나리오>` | 공통 | 실행 구분값. 결과 디렉터리 이름, Prometheus `run_id` label |
 | `FIRMWARE_SIZE_MB` | `1` | smoke | 시험 파일 크기 |
 | `STAGES` | `10:1m,50:2m,100:3m,100:3m,10:2m` | server-hpa | `목표 요청률(iteration/s):시간` 목록. 앞 단계 값에서 목표까지 그 시간 동안 직선으로 올린다 (아래 단계 유지) |
 | `VEHICLES` | `100` | server-hpa | 차량 수 = 최대 VU. VU 하나가 차량 하나를 맡는다 |
@@ -92,7 +92,7 @@ JUMP_HOST= taskset -c 10,11 k6/scripts/run.sh server-hpa -e STAGES=... -e VEHICL
 ## 결과
 
 - **로컬**: `k6/runs/<RUN_ID>/` 에 `conditions.txt`(실행 조건·종료 코드), `k6.log`, `summary.json`. git 에 올리지 않는다.
-- **Prometheus**: `k6_` 로 시작하는 지표에 `run_id`·`experiment`·`name`(`check-in`, `manifest`, `fixture:*`) label 이 붙는다 (`run_id`·`experiment` 는 `server-hpa` 만). 응답 시간은 `p(50)·p(95)·p(99)·avg·max` 로 보낸다. 차량 ID 가 들어간 `url` tag 는 보내지 않는다.
+- **Prometheus**: `k6_` 로 시작하는 지표에 `run_id`·`experiment`·`name`(`check-in`, `manifest`, `fixture:*`) label 이 붙는다 (`experiment` 는 `server-hpa`·`smoke-e2e`). 응답 시간은 `p(50)·p(95)·p(99)·avg·max` 로 보낸다. 차량 ID 가 들어간 `url` tag 는 보내지 않는다.
   - fixture 요청은 `phase="fixture"` 로 구분되므로 측정에서는 `name` 이 `check-in`·`manifest` 인 것만 본다.
   - `k6_dropped_iterations_total` 은 한 번도 발생하지 않으면 시계열 자체가 없다. 조회할 때 `or vector(0)` 으로 0 을 채운다.
   - 2026-10-17 ASTRA 호스트에서 확인: `server-hpa`(`STAGES=1:20s`, `VEHICLES=2`) 1회로 시계열 274개가 `run_id`·`experiment="server-hpa"`·`name` label 과 함께 들어옴, `url` label 없음.
