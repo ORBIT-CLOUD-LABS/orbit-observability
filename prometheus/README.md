@@ -29,7 +29,7 @@ sudo systemctl restart prometheus
 curl -s http://localhost:9090/api/v1/status/flags | grep -i remote-write
 ```
 
-9090은 Alloy가 실제로 보내는 출발지(k8s 노드 4대 — Pod 트래픽은 node IP로 SNAT되어 나간다)에서만 열어둔다.
+9090은 실제로 remote write를 보내는 출발지에서만 열어둔다. Alloy는 k8s 노드 4대(Pod 트래픽은 node IP로 SNAT되어 나간다), k6는 실행하는 위치마다 추가한다(`k6/README.md` 실행 위치). 현재 허용한 k6 출발지는 `192.168.100.1` 하나다. ASTRA 호스트 자신과, Tailscale 로 들어오는 ASTRA 밖 장비(ASTRA 가 서브넷 라우터로 출발지를 자기 주소로 바꿔 보낸다)가 모두 이 주소로 보인다(2026-10-17 개인 Mac 에서 허용 전 연결 불가 → 허용 후 `/-/ready` 200 확인). LAN 으로 직접 연결되는 장비는 그 주소를 따로 추가한다.
 
 ```bash
 sudo apt install -y ufw   # 이미 설치돼 있으면 건너뜀
@@ -37,7 +37,14 @@ sudo ufw allow from 192.168.100.101 to any port 9090 proto tcp  # astra-control-
 sudo ufw allow from 192.168.100.102 to any port 9090 proto tcp  # astra-worker-1
 sudo ufw allow from 192.168.100.103 to any port 9090 proto tcp  # astra-worker-2
 sudo ufw allow from 192.168.100.104 to any port 9090 proto tcp  # astra-worker-3
+sudo ufw allow from 192.168.100.1 to any port 9090 proto tcp comment "astra-host k6 remote write (orbit#23)"  # ASTRA 호스트 (k6)
 sudo ufw deny 9090/tcp
+```
+
+이미 deny 규칙이 있는 VM에 허용 출발지를 추가할 때는 `ufw allow`가 규칙을 맨 뒤에 붙여 deny에 먼저 걸린다. `sudo ufw status numbered`로 `9090/tcp DENY` 의 번호를 확인한 뒤 그 번호로 끼워 넣는다(2026-10-17 k6 출발지 추가 시 7번).
+
+```bash
+sudo ufw insert 7 allow from 192.168.100.1 to any port 9090 proto tcp comment "astra-host k6 remote write (orbit#23)"
 ```
 
 allow 규칙을 deny보다 먼저 추가해야 순서대로 평가되어 허용 출발지가 막히지 않는다(orbit-infrastructure#45 트러블슈팅 참고). `ufw enable` 자체는 SSH·k8s 포트 allowlist 정리 후 별도로 진행한다(orbit-infrastructure#51).

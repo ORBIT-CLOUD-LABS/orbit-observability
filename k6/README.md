@@ -16,9 +16,26 @@ Phase1 서버 HPA·복구 실험(ORBIT-CLOUD-LABS/orbit#23)과 OTA 전체 흐름
 
 ## 실행 전 확인
 
-- **실행 위치**: 내부망(`192.168.100.0/24`)에 직접 닿는 ASTRA 밖 호스트. ASTRA 안 VM 에서 실행하면 서버와 물리 CPU 를 나눠 써 결과가 왜곡된다.
+- **실행 위치**: 위치는 실험 조건의 하나다. 여러 위치에서 실행해 볼 수 있으며, 아래를 지킨다.
+  - 비교하는 run(예: 고정 replica vs HPA, 사전 측정과 본 실험)은 같은 위치에서 실행한다. 위치는 `conditions.txt` 의 `host` 로 남는다.
+  - 실행마다 dropped iterations 와 부하 발생기 쪽 CPU 를 함께 보고, 결과 문서에 위치와 경로(직접·중계)를 적는다.
   - SSH 터널은 smoke 처럼 1회 확인할 때만 쓴다. 터널이 병목이 되므로 부하 실험에는 쓰지 않는다.
+
+  | 위치 | 경로 (2026-10-17 확인) | 주의 |
+  | --- | --- | --- |
+  | ASTRA 호스트 (`orbit-astra`, `192.168.100.1`) | `virbr100` 직접 | VM 과 물리 CPU 를 나눠 쓴다. `taskset` 으로 k6 코어를 묶고(예: 10·11), ASTRA 호스트 CPU(node_exporter `192.168.100.1`)를 함께 기록한다 |
+  | ASTRA 밖 장비 (개인 Mac, orbit-sol 등) | Tailscale 중계(DERP, 왕복 약 70ms) | 중계의 대역폭·지연이 결과에 섞인다. 들어오는 트래픽은 ASTRA 의 `tailscaled` 가 풀므로 ASTRA CPU 도 쓴다. LAN 으로 직접 연결되면 경로를 다시 확인한다 |
+  | ASTRA 안 VM | 내부망 직접 | vCPU 가 이미 과할당(14 vCPU / 12 스레드)이라 서버와 CPU 를 다툰다 |
 - **접근**: 서버 `192.168.100.102:30080`, Edge `:30081`, Prometheus `192.168.100.107:9090`
+  - Prometheus 9090 은 허용 출발지만 받는다. ASTRA 호스트와 Tailscale 경유 장비는 모두 `192.168.100.1` 로 보여 이미 허용돼 있다. LAN 으로 직접 연결되는 장비처럼 다른 주소로 들어오면 모니터링 VM ufw 에 추가한다 (`prometheus/README.md` Remote write). 허용 전에는 `run.sh` 가 시작 전에 멈춘다 (`NO_PROM=1` 이면 보내지 않고 실행)
+- **k6 설치 (ASTRA 호스트)**: sudo 없이 공식 릴리스 바이너리를 체크섬 확인 후 `~/.local/bin` 에 둔다. 비대화형 ssh 셸에는 이 경로가 `PATH` 에 없으므로 실행 시 지정한다.
+
+  ```bash
+  V=v2.3.0; F=k6-$V-linux-amd64.tar.gz
+  curl -fsSLO https://github.com/grafana/k6/releases/download/$V/$F
+  curl -fsSL https://github.com/grafana/k6/releases/download/$V/k6-$V-checksums.txt | grep " $F\$" | sha256sum -c -
+  tar xzf $F && install -m 755 k6-$V-linux-amd64/k6 ~/.local/bin/k6
+  ```
 - **토큰**: `run.sh` 가 `orbit-astra` → control-plane 경유로 Secret `orbit/orbit-server-secret` 에서 읽는다. 다른 경로면 `ADMIN_TOKEN`·`ENROLLMENT_KEY` 를 환경 변수로 직접 지정한다.
 - **동시 실행 금지**: 서버 실험과 CDN 실험을 함께 돌리지 않는다. 실행 중에는 서버 이미지·설정을 바꾸지 않는다.
 
@@ -34,25 +51,36 @@ k6/scripts/run.sh server-hpa -e STAGES=10:1m,50:3m,100:5m,10:2m -e VEHICLES=100 
 
 `run.sh` 뒤의 인자는 그대로 `k6 run` 에 넘어간다.
 
+ASTRA 호스트에서 실행할 때는 `~/orbit-observability`(develop clone)에서 아래처럼 한다. 이미 ASTRA 안이므로 `JUMP_HOST=` 로 control-plane 에 직접 접속해 토큰을 읽는다.
+
+```bash
+cd ~/orbit-observability && git pull --ff-only
+export PATH=$HOME/.local/bin:$PATH
+JUMP_HOST= taskset -c 10,11 k6/scripts/run.sh server-hpa -e STAGES=... -e VEHICLES=100 -e UPDATE_RATIO=0.1
+```
+
 ### 설정 값
 
 | 값 | 기본값 | 시나리오 | 설명 |
 | --- | --- | --- | --- |
 | `SERVER_URL` | `http://192.168.100.102:30080` | 공통 | 서버 NodePort |
 | `CDN_URL` | 없음 | smoke | 매니페스트 `downloadUrl` 의 주소 부분을 바꿀 때 (터널 등) |
-| `RUN_ID` | `<UTC 시각>-<시나리오>` | 공통 | 실행 구분값. Prometheus `run_id` label, 결과 디렉터리 이름 |
+| `RUN_ID` | `<UTC 시각>-<시나리오>` | 공통 | 실행 구분값. 결과 디렉터리 이름. Prometheus `run_id` label 은 `server-hpa` 만 붙인다 (smoke 는 없음) |
 | `FIRMWARE_SIZE_MB` | `1` | smoke | 시험 파일 크기 |
 | `STAGES` | `10:1m,50:2m,100:3m,100:3m,10:2m` | server-hpa | `요청률(iteration/s):유지 시간` 목록 |
 | `VEHICLES` | `100` | server-hpa | 차량 수 = 최대 VU. VU 하나가 차량 하나를 맡는다 |
 | `UPDATE_RATIO` | `0.1` | server-hpa | 업데이트 대상 비율. 대상이면 매니페스트까지 호출 |
+| `JUMP_HOST` | `orbit-astra` | run.sh, cleanup.sh | 클러스터 VM 에 접속할 때 거치는 호스트. ASTRA 호스트에서 실행하면 빈 값(`JUMP_HOST=`) |
 | `NO_PROM` | `0` | run.sh | `1` 이면 Prometheus 로 보내지 않는다 |
 | `PROM_RW_URL` | `http://192.168.100.107:9090/api/v1/write` | run.sh | remote write 주소 |
 
 ## 결과
 
 - **로컬**: `k6/runs/<RUN_ID>/` 에 `conditions.txt`(실행 조건·종료 코드), `k6.log`, `summary.json`. git 에 올리지 않는다.
-- **Prometheus**: `k6_` 로 시작하는 지표에 `run_id`·`experiment`·`name`(`check-in`, `manifest`, `fixture:*`) label 이 붙는다. 응답 시간은 `p(50)·p(95)·p(99)·avg·max` 로 보낸다. 차량 ID 가 들어간 `url` tag 는 보내지 않는다.
+- **Prometheus**: `k6_` 로 시작하는 지표에 `run_id`·`experiment`·`name`(`check-in`, `manifest`, `fixture:*`) label 이 붙는다 (`run_id`·`experiment` 는 `server-hpa` 만). 응답 시간은 `p(50)·p(95)·p(99)·avg·max` 로 보낸다. 차량 ID 가 들어간 `url` tag 는 보내지 않는다.
   - fixture 요청은 `phase="fixture"` 로 구분되므로 측정에서는 `name` 이 `check-in`·`manifest` 인 것만 본다.
+  - `k6_dropped_iterations_total` 은 한 번도 발생하지 않으면 시계열 자체가 없다. 조회할 때 `or vector(0)` 으로 0 을 채운다.
+  - 2026-10-17 ASTRA 호스트에서 확인: `server-hpa`(`STAGES=1:20s`, `VEHICLES=2`) 1회로 시계열 274개가 `run_id`·`experiment="server-hpa"`·`name` label 과 함께 들어옴, `url` label 없음.
 - **결과 문서**: run ID 별 조건·원시 결과·판정은 orbit 레포에 정리한다.
 - `server-hpa` 의 thresholds 는 판정 기준이 아니다. 요약에 `name` 별 값을 따로 보여 주기 위한 기준선이다.
 
