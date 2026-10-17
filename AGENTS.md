@@ -14,6 +14,7 @@ Phase1 작업은 orbit `docs/phase1.md` 를 먼저 읽는다.
 | 상황 | 문서 |
 | --- | --- |
 | 수집 구조·공통 값 확인 (항상) | [docs/requirements.md](docs/requirements.md) |
+| 수집 대상·대시보드 패널 추가·변경 | [docs/monitoring-targets.md](docs/monitoring-targets.md) |
 | k6 시나리오·fixture 작성 | [docs/requirements.md](docs/requirements.md) §k6 부하 실험, orbit `docs/api.md` |
 | Issue·Branch·커밋·PR·리뷰 | Org 공통 [CONTRIBUTING.md](https://github.com/ORBIT-CLOUD-LABS/.github/blob/main/CONTRIBUTING.md) |
 
