@@ -32,7 +32,7 @@ Phase1 작업은 orbit `docs/phase1.md` 를 먼저 읽는다.
 클러스터 안 Alloy ──remote write──▶ Prometheus (192.168.100.107:9090)
                  └──push─────────▶ Loki       (192.168.100.107:3100)
 VM·호스트 node_exporter (:9100) ◀──scrape── Prometheus
-k6 (ASTRA 밖 호스트) ──remote write──▶ Prometheus
+k6 (ASTRA 호스트·ASTRA 밖 장비) ──remote write──▶ Prometheus
 Grafana (:3000) ──조회──▶ Prometheus, Loki
 ```
 
@@ -43,7 +43,7 @@ Grafana (:3000) ──조회──▶ Prometheus, Loki
 - label 은 namespace·app·pod·instance 수준으로 둔다. 차량 ID·토큰처럼 값이 계속 늘어나는 항목을 label 로 쓰지 않는다.
 - 비밀번호·토큰을 커밋하지 않는다. k6 는 토큰을 `-e` 환경 변수로만 받는다.
 - 미확정 공통 값은 확정된 것처럼 고정하지 말고 사용자에게 확인한다.
-- k6 는 ASTRA 밖 호스트에서 실행한다. 서버 실험과 CDN 실험은 동시에 실행하지 않는다.
+- k6 실행 위치는 실험 조건으로 기록하고, 비교하는 run 은 같은 위치에서 실행한다 (`k6/README.md` 실행 위치). 서버 실험과 CDN 실험은 동시에 실행하지 않는다.
 - k6 가 만드는 데이터는 차종(model)을 `K6-` 로 시작해 실제 데이터와 구분한다.
 
 ## 검증
