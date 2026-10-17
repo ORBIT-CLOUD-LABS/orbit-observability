@@ -33,14 +33,16 @@ if [[ ! "$prefix" =~ ^K6-[A-Za-z0-9-]*$ ]]; then
   exit 2
 fi
 
+# ssh 는 원격 명령에 쓰지 않아도 stdin 을 읽는다. -n 이 없으면 확인 입력을 파이프로 줄 때
+# (echo K6-... | cleanup.sh K6-...) 삭제 대상 조회용 ssh 가 그 입력을 먼저 먹어서 read 가 빈 값을 받고 취소된다.
 remote() {
   local host="$1" cmd="$2"
   if [[ -n "$JUMP_HOST" ]]; then
     # 경유 호스트의 셸이 한 번 더 해석하므로 명령을 클라이언트에서 미리 quote 해서 넘긴다.
     # shellcheck disable=SC2029
-    ssh "$JUMP_HOST" "ssh -o BatchMode=yes ${REMOTE_USER}@${host} $(printf '%q' "$cmd")"
+    ssh -n "$JUMP_HOST" "ssh -n -o BatchMode=yes ${REMOTE_USER}@${host} $(printf '%q' "$cmd")"
   else
-    ssh -o BatchMode=yes "${REMOTE_USER}@${host}" "$cmd"
+    ssh -n -o BatchMode=yes "${REMOTE_USER}@${host}" "$cmd"
   fi
 }
 

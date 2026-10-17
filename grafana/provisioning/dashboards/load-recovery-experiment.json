@@ -8,12 +8,32 @@
   "version": 1,
   "refresh": "30s",
   "time": { "from": "now-6h", "to": "now" },
+  "annotations": {
+    "list": [
+      {
+        "name": "HPA scale",
+        "datasource": { "type": "loki", "uid": "loki" },
+        "enable": true,
+        "iconColor": "orange",
+        "expr": "{namespace=\"orbit\", job=\"k8s-events\"} |= \"SuccessfulRescale\"",
+        "textFormat": "{{__line__}}"
+      },
+      {
+        "name": "orbit-server Pod 생성·삭제·probe 실패",
+        "datasource": { "type": "loki", "uid": "loki" },
+        "enable": true,
+        "iconColor": "purple",
+        "expr": "{namespace=\"orbit\", job=\"k8s-events\"} |= \"orbit-server-\" |~ \"reason=(Started|Killing|Unhealthy)\"",
+        "textFormat": "{{__line__}}"
+      }
+    ]
+  },
   "templating": {
     "list": [
       {
         "name": "run_id",
         "label": "k6 run_id",
-        "description": "k6 패널에서 볼 실행. run.sh 가 붙이는 run_id label (server-hpa 만 붙고 smoke 는 없다).",
+        "description": "k6 패널에서 볼 실행. run.sh 가 붙이는 run_id label (server-hpa·smoke-e2e).",
         "type": "query",
         "datasource": { "type": "prometheus", "uid": "prometheus" },
         "query": { "query": "label_values(k6_iterations_total, run_id)", "refId": "run_id" },
@@ -87,23 +107,24 @@
       "title": "Pod별 CPU 사용량 vs request / limit",
       "description": "container_cpu_usage_seconds_total(cAdvisor)과 kube_pod_container_resource_requests/limits(resource=\"cpu\")를 같은 패널에 겹쳐 그린다. container!=\"\" 로 cAdvisor의 pod 전체 합산(빈 container label) 가짜 시계열을 제외한다.",
       "gridPos": { "x": 0, "y": 9, "w": 12, "h": 8 },
+      "transformations": [{ "id": "renameByRegex", "options": { "regex": "^orbit-server-[a-z0-9]+-([a-z0-9]+)(.*)$", "renamePattern": "OTA [$1]$2" } }],
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
       "targets": [
         {
           "refId": "A",
           "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"orbit\", pod=~\"orbit-server-.*\", container!=\"\", container!=\"POD\"}[5m]))",
-          "legendFormat": "{{pod}} usage"
+          "legendFormat": "{{pod}} 사용량"
         },
         {
           "refId": "B",
           "expr": "sum by (pod) (kube_pod_container_resource_requests{namespace=\"orbit\", pod=~\"orbit-server-.*\", resource=\"cpu\"})",
-          "legendFormat": "{{pod}} request"
+          "legendFormat": "{{pod}} 예약량"
         },
         {
           "refId": "C",
           "expr": "sum by (pod) (kube_pod_container_resource_limits{namespace=\"orbit\", pod=~\"orbit-server-.*\", resource=\"cpu\"})",
-          "legendFormat": "{{pod}} limit"
+          "legendFormat": "{{pod}} 상한"
         }
       ]
     },
@@ -113,23 +134,24 @@
       "title": "Pod별 메모리 사용량 vs request / limit",
       "description": "container_memory_working_set_bytes(cAdvisor)과 kube_pod_container_resource_requests/limits(resource=\"memory\").",
       "gridPos": { "x": 12, "y": 9, "w": 12, "h": 8 },
+      "transformations": [{ "id": "renameByRegex", "options": { "regex": "^orbit-server-[a-z0-9]+-([a-z0-9]+)(.*)$", "renamePattern": "OTA [$1]$2" } }],
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
       "targets": [
         {
           "refId": "A",
           "expr": "sum by (pod) (container_memory_working_set_bytes{namespace=\"orbit\", pod=~\"orbit-server-.*\", container!=\"\", container!=\"POD\"})",
-          "legendFormat": "{{pod}} usage"
+          "legendFormat": "{{pod}} 사용량"
         },
         {
           "refId": "B",
           "expr": "sum by (pod) (kube_pod_container_resource_requests{namespace=\"orbit\", pod=~\"orbit-server-.*\", resource=\"memory\"})",
-          "legendFormat": "{{pod}} request"
+          "legendFormat": "{{pod}} 예약량"
         },
         {
           "refId": "C",
           "expr": "sum by (pod) (kube_pod_container_resource_limits{namespace=\"orbit\", pod=~\"orbit-server-.*\", resource=\"memory\"})",
-          "legendFormat": "{{pod}} limit"
+          "legendFormat": "{{pod}} 상한"
         }
       ]
     },
@@ -139,6 +161,7 @@
       "title": "Pod별 CPU throttling 비율",
       "description": "container_cpu_cfs_throttled_periods_total ÷ container_cpu_cfs_periods_total (issue #6에서 지정한 정의 그대로). 서버 Pod가 CPU limit에 막혀 병목이었는지 판단하는 근거.",
       "gridPos": { "x": 0, "y": 17, "w": 12, "h": 8 },
+      "transformations": [{ "id": "renameByRegex", "options": { "regex": "^orbit-server-[a-z0-9]+-([a-z0-9]+)(.*)$", "renamePattern": "OTA [$1]$2" } }],
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] },
       "targets": [
@@ -155,6 +178,7 @@
       "title": "JVM heap / non-heap",
       "description": "jvm_memory_used_bytes를 area(heap/nonheap)별로 합산. 메모리 풀 단위(id label)까지는 labelkeep에서 보지 않는다(카디널리티 때문에 제외).",
       "gridPos": { "x": 12, "y": 17, "w": 12, "h": 8 },
+      "transformations": [{ "id": "renameByRegex", "options": { "regex": "^orbit-server-[a-z0-9]+-([a-z0-9]+)(.*)$", "renamePattern": "OTA [$1]$2" } }],
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
       "targets": [
@@ -171,18 +195,19 @@
       "title": "Hikari pool 활성 / 대기 연결 수",
       "description": "Spring Boot가 HikariDataSource를 자동으로 Micrometer에 바인딩해 노출하는 기본 메트릭(hikaricp_connections_*). pool 이름은 애플리케이션당 하나뿐이라 label로 구분하지 않는다.",
       "gridPos": { "x": 0, "y": 25, "w": 12, "h": 8 },
+      "transformations": [{ "id": "renameByRegex", "options": { "regex": "^orbit-server-[a-z0-9]+-([a-z0-9]+)(.*)$", "renamePattern": "OTA [$1]$2" } }],
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
       "targets": [
         {
           "refId": "A",
           "expr": "sum by (pod) (hikaricp_connections_active{namespace=\"orbit\", pod=~\"orbit-server-.*\"})",
-          "legendFormat": "{{pod}} active"
+          "legendFormat": "{{pod}} 활성"
         },
         {
           "refId": "B",
           "expr": "sum by (pod) (hikaricp_connections_pending{namespace=\"orbit\", pod=~\"orbit-server-.*\"})",
-          "legendFormat": "{{pod}} pending"
+          "legendFormat": "{{pod}} 대기"
         }
       ]
     },
@@ -192,13 +217,14 @@
       "title": "Hikari 연결 획득 평균 대기 시간",
       "description": "hikaricp_connections_acquire_seconds_sum/_count의 rate 비율(평균). DB가 포화돼 연결 획득이 느려지는지 확인.",
       "gridPos": { "x": 12, "y": 25, "w": 12, "h": 8 },
+      "transformations": [{ "id": "renameByRegex", "options": { "regex": "^orbit-server-[a-z0-9]+-([a-z0-9]+)(.*)$", "renamePattern": "OTA [$1]$2" } }],
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
       "targets": [
         {
           "refId": "A",
           "expr": "sum by (pod) (rate(hikaricp_connections_acquire_seconds_sum{namespace=\"orbit\", pod=~\"orbit-server-.*\"}[5m])) / sum by (pod) (rate(hikaricp_connections_acquire_seconds_count{namespace=\"orbit\", pod=~\"orbit-server-.*\"}[5m]))",
-          "legendFormat": "{{pod}} avg acquire time"
+          "legendFormat": "{{pod}} 평균 획득 대기"
         }
       ]
     },
@@ -326,6 +352,17 @@
       "title": "VM·노드 CPU 사용률",
       "description": "prometheus.yml의 node job(5s 간격)을 직접 scrape — Alloy·labelkeep을 거치지 않아 label 제한이 없다. instance 매핑: .1=astra 호스트, .100=jenkins, .101=control-plane, .102~104=worker1~3, .105=nfs, .106=vehicle-db, .107=monitoring.",
       "gridPos": { "x": 0, "y": 67, "w": 12, "h": 8 },
+      "transformations": [
+        { "id": "renameByRegex", "options": { "regex": "^192\\.168\\.100\\.1:9100(.*)$", "renamePattern": "ASTRA 호스트$1" } },
+        { "id": "renameByRegex", "options": { "regex": "^192\\.168\\.100\\.100:9100(.*)$", "renamePattern": "Jenkins$1" } },
+        { "id": "renameByRegex", "options": { "regex": "^192\\.168\\.100\\.101:9100(.*)$", "renamePattern": "Control plane$1" } },
+        { "id": "renameByRegex", "options": { "regex": "^192\\.168\\.100\\.102:9100(.*)$", "renamePattern": "Worker 1$1" } },
+        { "id": "renameByRegex", "options": { "regex": "^192\\.168\\.100\\.103:9100(.*)$", "renamePattern": "Worker 2$1" } },
+        { "id": "renameByRegex", "options": { "regex": "^192\\.168\\.100\\.104:9100(.*)$", "renamePattern": "Worker 3$1" } },
+        { "id": "renameByRegex", "options": { "regex": "^192\\.168\\.100\\.105:9100(.*)$", "renamePattern": "Origin NFS$1" } },
+        { "id": "renameByRegex", "options": { "regex": "^192\\.168\\.100\\.106:9100(.*)$", "renamePattern": "Vehicle DB$1" } },
+        { "id": "renameByRegex", "options": { "regex": "^192\\.168\\.100\\.107:9100(.*)$", "renamePattern": "Monitoring$1" } }
+      ],
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "percent" }, "overrides": [] },
       "targets": [
@@ -341,6 +378,17 @@
       "type": "timeseries",
       "title": "VM·노드 메모리 사용률",
       "gridPos": { "x": 12, "y": 67, "w": 12, "h": 8 },
+      "transformations": [
+        { "id": "renameByRegex", "options": { "regex": "^192\\.168\\.100\\.1:9100(.*)$", "renamePattern": "ASTRA 호스트$1" } },
+        { "id": "renameByRegex", "options": { "regex": "^192\\.168\\.100\\.100:9100(.*)$", "renamePattern": "Jenkins$1" } },
+        { "id": "renameByRegex", "options": { "regex": "^192\\.168\\.100\\.101:9100(.*)$", "renamePattern": "Control plane$1" } },
+        { "id": "renameByRegex", "options": { "regex": "^192\\.168\\.100\\.102:9100(.*)$", "renamePattern": "Worker 1$1" } },
+        { "id": "renameByRegex", "options": { "regex": "^192\\.168\\.100\\.103:9100(.*)$", "renamePattern": "Worker 2$1" } },
+        { "id": "renameByRegex", "options": { "regex": "^192\\.168\\.100\\.104:9100(.*)$", "renamePattern": "Worker 3$1" } },
+        { "id": "renameByRegex", "options": { "regex": "^192\\.168\\.100\\.105:9100(.*)$", "renamePattern": "Origin NFS$1" } },
+        { "id": "renameByRegex", "options": { "regex": "^192\\.168\\.100\\.106:9100(.*)$", "renamePattern": "Vehicle DB$1" } },
+        { "id": "renameByRegex", "options": { "regex": "^192\\.168\\.100\\.107:9100(.*)$", "renamePattern": "Monitoring$1" } }
+      ],
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "percent" }, "overrides": [] },
       "targets": [
@@ -357,34 +405,73 @@
       "title": "VM·노드 디스크 I/O",
       "description": "node_disk_*_bytes_total. astra-nfs(.105)는 펌웨어 원본 쓰기, astra-vehicle-db(.106)는 DB I/O를 본다.",
       "gridPos": { "x": 0, "y": 75, "w": 12, "h": 8 },
+      "transformations": [
+        { "id": "renameByRegex", "options": { "regex": "^192\\.168\\.100\\.1:9100(.*)$", "renamePattern": "ASTRA 호스트$1" } },
+        { "id": "renameByRegex", "options": { "regex": "^192\\.168\\.100\\.100:9100(.*)$", "renamePattern": "Jenkins$1" } },
+        { "id": "renameByRegex", "options": { "regex": "^192\\.168\\.100\\.101:9100(.*)$", "renamePattern": "Control plane$1" } },
+        { "id": "renameByRegex", "options": { "regex": "^192\\.168\\.100\\.102:9100(.*)$", "renamePattern": "Worker 1$1" } },
+        { "id": "renameByRegex", "options": { "regex": "^192\\.168\\.100\\.103:9100(.*)$", "renamePattern": "Worker 2$1" } },
+        { "id": "renameByRegex", "options": { "regex": "^192\\.168\\.100\\.104:9100(.*)$", "renamePattern": "Worker 3$1" } },
+        { "id": "renameByRegex", "options": { "regex": "^192\\.168\\.100\\.105:9100(.*)$", "renamePattern": "Origin NFS$1" } },
+        { "id": "renameByRegex", "options": { "regex": "^192\\.168\\.100\\.106:9100(.*)$", "renamePattern": "Vehicle DB$1" } },
+        { "id": "renameByRegex", "options": { "regex": "^192\\.168\\.100\\.107:9100(.*)$", "renamePattern": "Monitoring$1" } }
+      ],
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "Bps" }, "overrides": [] },
       "targets": [
         {
           "refId": "A",
           "expr": "sum by (instance) (rate(node_disk_read_bytes_total[5m]))",
-          "legendFormat": "{{instance}} read"
+          "legendFormat": "{{instance}} 읽기"
         },
         {
           "refId": "B",
           "expr": "sum by (instance) (rate(node_disk_written_bytes_total[5m]))",
-          "legendFormat": "{{instance}} write"
+          "legendFormat": "{{instance}} 쓰기"
         }
       ]
     },
     {
       "id": 18,
       "type": "timeseries",
-      "title": "DB VM(astra-vehicle-db) CPU — 서버 화면과 같은 시간축 참고용",
-      "description": "서버 replica·처리량과 겹쳐 봐야 하는 값이라 서버 화면에도 같은 패널을 둔다(issue #6 명시 사항). 쿼리는 위 VM CPU 패널과 동일하되 instance를 DB VM 하나로 고정.",
+      "title": "DB VM(astra-vehicle-db) CPU user·system·iowait / 디스크 쓰기 — 서버 화면과 같은 시간축 참고용",
+      "description": "서버 replica·처리량과 겹쳐 봐야 하는 값이라 서버 화면에도 같은 패널을 둔다(issue #6 명시 사항). CPU 는 mode 별로 쌓아 보인다. iowait 는 CPU 가 디스크를 기다리며 쉬는 시간이라 계산 사용량이 아니다. `100 - idle` 하나로 보면 iowait 까지 사용 중으로 세어 DB 가 CPU 로 포화된 것처럼 보인다 (orbit#23 T_db 측정: 'CPU 96~100%' 중 약 40% 가 iowait, user+system 은 55~58% 에서 멈춤). 체크인마다 commit 이 디스크 동기화를 일으키므로 오른쪽 축의 디스크 쓰기 횟수와 함께 본다.",
       "gridPos": { "x": 12, "y": 75, "w": 12, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "percent" }, "overrides": [] },
+      "fieldConfig": {
+        "defaults": { "unit": "percent", "min": 0, "custom": { "stacking": { "mode": "normal" }, "fillOpacity": 30 } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "디스크 쓰기" },
+            "properties": [
+              { "id": "unit", "value": "iops" },
+              { "id": "custom.axisPlacement", "value": "right" },
+              { "id": "custom.stacking", "value": { "mode": "none" } },
+              { "id": "custom.fillOpacity", "value": 0 }
+            ]
+          }
+        ]
+      },
       "targets": [
         {
           "refId": "A",
-          "expr": "100 - (avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\", instance=\"192.168.100.106:9100\"}[5m])) * 100)",
-          "legendFormat": "astra-vehicle-db"
+          "expr": "100 * sum(rate(node_cpu_seconds_total{mode=\"user\", instance=\"192.168.100.106:9100\"}[5m])) / count(node_cpu_seconds_total{mode=\"idle\", instance=\"192.168.100.106:9100\"})",
+          "legendFormat": "user"
+        },
+        {
+          "refId": "B",
+          "expr": "100 * sum(rate(node_cpu_seconds_total{mode=~\"system|irq|softirq\", instance=\"192.168.100.106:9100\"}[5m])) / count(node_cpu_seconds_total{mode=\"idle\", instance=\"192.168.100.106:9100\"})",
+          "legendFormat": "system"
+        },
+        {
+          "refId": "C",
+          "expr": "100 * sum(rate(node_cpu_seconds_total{mode=\"iowait\", instance=\"192.168.100.106:9100\"}[5m])) / count(node_cpu_seconds_total{mode=\"idle\", instance=\"192.168.100.106:9100\"})",
+          "legendFormat": "iowait"
+        },
+        {
+          "refId": "D",
+          "expr": "sum(rate(node_disk_writes_completed_total{instance=\"192.168.100.106:9100\", device=~\"vd.+\"}[5m]))",
+          "legendFormat": "디스크 쓰기"
         }
       ]
     },
@@ -401,6 +488,11 @@
       "title": "Pod 나이 (kubectl delete pod 삭제·재생성 시 0으로 리셋)",
       "description": "복구 실험 방식이 `kubectl delete pod`(Pod 객체 자체를 지우고 Deployment가 새 Pod를 띄움)로 확정됨에 따라, 컨테이너 크래시 재시작만 잡는 kube_pod_container_status_restarts_total 대신 kube_pod_start_time 기반으로 바꿨다. time() - kube_pod_start_time은 Pod 객체가 새로 생성될 때마다 0으로 리셋되는 '나이'이므로, 삭제 시점에 기존 pod 이름의 선이 끊기고 새 pod 이름의 선이 0부터 다시 시작하는 걸로 삭제·재생성 시점을 읽는다. kube-state-metrics의 pods collector에서 수집되며 events collector는 켜지 않았다(orbit-gitops#10/platform/kube-state-metrics/values.yaml) — 정확한 이벤트 타임라인이 필요해지면 별도로 events collector를 켜는 작업이 필요하다(지금은 범위 밖).",
       "gridPos": { "x": 0, "y": 84, "w": 24, "h": 8 },
+      "transformations": [
+        { "id": "renameByRegex", "options": { "regex": "^orbit-server-[a-z0-9]+-([a-z0-9]+)(.*)$", "renamePattern": "OTA [$1]$2" } },
+        { "id": "renameByRegex", "options": { "regex": "^cdn-edge-[a-z0-9]+-([a-z0-9]+)(.*)$", "renamePattern": "CDN Edge [$1]$2" } },
+        { "id": "renameByRegex", "options": { "regex": "^cdn-origin-[a-z0-9]+-([a-z0-9]+)(.*)$", "renamePattern": "CDN Origin [$1]$2" } }
+      ],
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "s", "min": 0 }, "overrides": [] },
       "targets": [
@@ -489,6 +581,44 @@
           "refId": "B",
           "expr": "sum(rate(k6_dropped_iterations_total{run_id=~\"$run_id\"}[30s])) or vector(0)",
           "legendFormat": "dropped iterations/s"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "서버 로그 (Loki)",
+      "gridPos": { "x": 0, "y": 109, "w": 24, "h": 1 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 25,
+      "type": "timeseries",
+      "title": "서버 WARN·ERROR 로그 수 (Pod별)",
+      "description": "orbit-server 는 정상 요청마다 로그를 남기지 않고, 문제가 생길 때 WARN·ERROR 를 남긴다 (예: DB 연결 획득 지연 시 'DataSourceHealthIndicator (db) took 20008ms'). 0 이 아니면 오른쪽 로그 목록에서 내용을 본다. Loki 로그 줄 수라 지표가 아닌 참고값이다.",
+      "gridPos": { "x": 0, "y": 110, "w": 12, "h": 8 },
+      "transformations": [{ "id": "renameByRegex", "options": { "regex": "^orbit-server-[a-z0-9]+-([a-z0-9]+)(.*)$", "renamePattern": "OTA [$1]$2" } }],
+      "datasource": { "type": "loki", "uid": "loki" },
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "fillOpacity": 60 } }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (pod, level) (count_over_time({namespace=\"orbit\", app=\"orbit-server\"} |~ `^\\S+\\s+(WARN|ERROR)\\s` | regexp `^\\S+\\s+(?P<level>WARN|ERROR)\\s` [1m]))",
+          "legendFormat": "{{pod}} {{level}}"
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "type": "logs",
+      "title": "서버 WARN·ERROR 로그",
+      "description": "orbit-server 의 WARN·ERROR 로그 원문. 왼쪽 그래프와 같은 시간축에서 원인(DB 지연, 예외 stack trace 등)을 확인한다.",
+      "gridPos": { "x": 12, "y": 110, "w": 12, "h": 8 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{namespace=\"orbit\", app=\"orbit-server\"} |~ `^\\S+\\s+(WARN|ERROR)\\s`"
         }
       ]
     }
