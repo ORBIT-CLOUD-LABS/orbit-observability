@@ -205,20 +205,20 @@
     {
       "id": 9,
       "type": "timeseries",
-      "title": "API 요청률 / 오류율 (status별)",
-      "description": "http_server_requests_seconds_count(Spring Boot Actuator/Micrometer 기본 메트릭)를 status별로 합산. uri는 카디널리티 때문에 label로 보지 않는다 — 엔드포인트별 분석이 필요하면 별도 패널에서 uri를 추가해야 한다.",
+      "title": "차량 API 요청률 / 오류율 (uri·status별)",
+      "description": "http_server_requests_seconds_count(Spring Boot Actuator/Micrometer 기본 메트릭)를 차량 API(uri=/api/v1/vehicles/{vehicleId}/...: check-in·manifest)만 골라 uri·status별로 합산. health probe·/actuator/prometheus scrape·관리자 API·차량 등록(fixture)은 뺀다. uri는 서버가 {vehicleId} 템플릿으로 내보내 차량 ID로 시계열이 늘지 않는다. uri label은 orbit-gitops#38(PR #39)부터 수집된다 — 그 전에는 uri가 없어 서로 다른 endpoint가 하나로 합쳐져 있었다.",
       "gridPos": { "x": 0, "y": 33, "w": 24, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (status) (rate(http_server_requests_seconds_count{namespace=\"orbit\", pod=~\"orbit-server-.*\"}[5m]))",
-          "legendFormat": "status {{status}}"
+          "expr": "sum by (uri, status) (rate(http_server_requests_seconds_count{namespace=\"orbit\", pod=~\"orbit-server-.*\", uri=~\"/api/v1/vehicles/[{]vehicleId[}]/.*\"}[5m]))",
+          "legendFormat": "{{uri}} {{status}}"
         },
         {
           "refId": "B",
-          "expr": "sum(rate(http_server_requests_seconds_count{namespace=\"orbit\", pod=~\"orbit-server-.*\", status=~\"5..\"}[5m])) / sum(rate(http_server_requests_seconds_count{namespace=\"orbit\", pod=~\"orbit-server-.*\"}[5m]))",
+          "expr": "(sum(rate(http_server_requests_seconds_count{namespace=\"orbit\", pod=~\"orbit-server-.*\", uri=~\"/api/v1/vehicles/[{]vehicleId[}]/.*\", status=~\"5..\"}[5m])) or vector(0)) / sum(rate(http_server_requests_seconds_count{namespace=\"orbit\", pod=~\"orbit-server-.*\", uri=~\"/api/v1/vehicles/[{]vehicleId[}]/.*\"}[5m]))",
           "legendFormat": "5xx 비율"
         }
       ]
@@ -226,16 +226,16 @@
     {
       "id": 10,
       "type": "timeseries",
-      "title": "API P95 지연시간",
-      "description": "http_server_requests_seconds_bucket의 le label로 histogram_quantile 계산. orbit-server application.yml의 management.metrics.distribution.percentiles-histogram.http.server.requests=true로 bucket이 켜져 있음을 코드로 확인(2026-10-16). le label이 labelkeep에서 빠지면 이 패널 전체가 깨진다(orbit-gitops#10 PR #27에서 수정).",
+      "title": "차량 API P95 지연시간 (uri별)",
+      "description": "http_server_requests_seconds_bucket의 le label로 histogram_quantile 계산. 위 요청률 패널과 같이 차량 API(check-in·manifest)만 골라 uri별로 나눈다 — health probe 등이 섞이면 P95가 실제 차량 API보다 낮게 나온다. orbit-server application.yml의 management.metrics.distribution.percentiles-histogram.http.server.requests=true로 bucket이 켜져 있음을 코드로 확인(2026-10-16). le·uri label이 labelkeep에서 빠지면 이 패널이 깨진다(orbit-gitops#10 PR #27, orbit-gitops#38 PR #39).",
       "gridPos": { "x": 0, "y": 41, "w": 24, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_requests_seconds_bucket{namespace=\"orbit\", pod=~\"orbit-server-.*\"}[5m])))",
-          "legendFormat": "p95"
+          "expr": "histogram_quantile(0.95, sum by (le, uri) (rate(http_server_requests_seconds_bucket{namespace=\"orbit\", pod=~\"orbit-server-.*\", uri=~\"/api/v1/vehicles/[{]vehicleId[}]/.*\"}[5m])))",
+          "legendFormat": "{{uri}} p95"
         }
       ]
     },
