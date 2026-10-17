@@ -375,16 +375,44 @@
     {
       "id": 18,
       "type": "timeseries",
-      "title": "DB VM(astra-vehicle-db) CPU — 서버 화면과 같은 시간축 참고용",
-      "description": "서버 replica·처리량과 겹쳐 봐야 하는 값이라 서버 화면에도 같은 패널을 둔다(issue #6 명시 사항). 쿼리는 위 VM CPU 패널과 동일하되 instance를 DB VM 하나로 고정.",
+      "title": "DB VM(astra-vehicle-db) CPU user·system·iowait / 디스크 쓰기 — 서버 화면과 같은 시간축 참고용",
+      "description": "서버 replica·처리량과 겹쳐 봐야 하는 값이라 서버 화면에도 같은 패널을 둔다(issue #6 명시 사항). CPU 는 mode 별로 쌓아 보인다. iowait 는 CPU 가 디스크를 기다리며 쉬는 시간이라 계산 사용량이 아니다. `100 - idle` 하나로 보면 iowait 까지 사용 중으로 세어 DB 가 CPU 로 포화된 것처럼 보인다 (orbit#23 T_db 측정: 'CPU 96~100%' 중 약 40% 가 iowait, user+system 은 55~58% 에서 멈춤). 체크인마다 commit 이 디스크 동기화를 일으키므로 오른쪽 축의 디스크 쓰기 횟수와 함께 본다.",
       "gridPos": { "x": 12, "y": 75, "w": 12, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "percent" }, "overrides": [] },
+      "fieldConfig": {
+        "defaults": { "unit": "percent", "min": 0, "custom": { "stacking": { "mode": "normal" }, "fillOpacity": 30 } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "디스크 쓰기" },
+            "properties": [
+              { "id": "unit", "value": "iops" },
+              { "id": "custom.axisPlacement", "value": "right" },
+              { "id": "custom.stacking", "value": { "mode": "none" } },
+              { "id": "custom.fillOpacity", "value": 0 }
+            ]
+          }
+        ]
+      },
       "targets": [
         {
           "refId": "A",
-          "expr": "100 - (avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\", instance=\"192.168.100.106:9100\"}[5m])) * 100)",
-          "legendFormat": "astra-vehicle-db"
+          "expr": "100 * sum(rate(node_cpu_seconds_total{mode=\"user\", instance=\"192.168.100.106:9100\"}[5m])) / count(node_cpu_seconds_total{mode=\"idle\", instance=\"192.168.100.106:9100\"})",
+          "legendFormat": "user"
+        },
+        {
+          "refId": "B",
+          "expr": "100 * sum(rate(node_cpu_seconds_total{mode=~\"system|irq|softirq\", instance=\"192.168.100.106:9100\"}[5m])) / count(node_cpu_seconds_total{mode=\"idle\", instance=\"192.168.100.106:9100\"})",
+          "legendFormat": "system"
+        },
+        {
+          "refId": "C",
+          "expr": "100 * sum(rate(node_cpu_seconds_total{mode=\"iowait\", instance=\"192.168.100.106:9100\"}[5m])) / count(node_cpu_seconds_total{mode=\"idle\", instance=\"192.168.100.106:9100\"})",
+          "legendFormat": "iowait"
+        },
+        {
+          "refId": "D",
+          "expr": "sum(rate(node_disk_writes_completed_total{instance=\"192.168.100.106:9100\", device=~\"vd.+\"}[5m]))",
+          "legendFormat": "디스크 쓰기"
         }
       ]
     },

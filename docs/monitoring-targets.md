@@ -38,7 +38,7 @@ remote write 9090 은 k8s 노드 4대와 `192.168.100.1` 에서만 받는다. AS
 | replica 가 늘었는가 | `kube_horizontalpodautoscaler_status_target_metric{metric_target_type="utilization"}`, `kube_deployment_spec_replicas`, `kube_deployment_status_replicas_available`, `kube_pod_status_ready` | kube-state-metrics | HPA 사용률, Replica |
 | 서버가 병목이었는가 | `container_cpu_usage_seconds_total`, `container_cpu_cfs_throttled_periods_total` / `container_cpu_cfs_periods_total`, `container_memory_working_set_bytes`, request·limit | cAdvisor, kube-state-metrics | Pod CPU·메모리·throttling |
 | 처리량이 개선됐는가 | `http_server_requests_seconds_*` (차량 API `uri` 별 요청률·5xx 비율·P95) | orbit-server | 차량 API 요청률·P95 |
-| DB 가 먼저 막혔는가 | DB VM CPU, `hikaricp_connections_active`·`pending`·`acquire_seconds` | node_exporter, orbit-server | Hikari, DB VM CPU |
+| DB 가 먼저 막혔는가 | DB VM CPU (user·system·iowait 구분), DB 디스크 쓰기 횟수, `hikaricp_connections_active`·`pending`·`acquire_seconds` | node_exporter, orbit-server | Hikari, DB VM CPU·디스크 쓰기 |
 | 부하 발생기는 정상이었는가 | `k6_http_reqs_total`, `k6_http_req_duration_p95`, `k6_dropped_iterations_total`, `k6_vus` | k6 | 부하 발생기 (k6) |
 | 물리 CPU 가 한계였는가 | ASTRA 호스트 `node_cpu_seconds_total` | node_exporter | VM·노드 CPU |
 
@@ -66,6 +66,7 @@ remote write 9090 은 k8s 노드 4대와 `192.168.100.1` 에서만 받는다. AS
 - **값이 계속 늘어나는 label 은 쓰지 않는다.** 차량 ID·토큰은 label 로 남기지 않는다. 서버 `uri` 는 `/api/v1/vehicles/{vehicleId}/...` 템플릿이라 차량 수와 무관하다. k6 는 `name` tag 로 묶고 `url` 은 보내지 않는다.
 - **차량 API 만 본다.** 서버 지표에는 health probe·`/actuator/prometheus` 요청도 섞인다. 판정 패널은 `uri=~"/api/v1/vehicles/[{]vehicleId[}]/.*"` 로 거른다. k6 는 `name=~"check-in|manifest"` 로 fixture 요청을 뺀다.
 - **값이 없을 수 있는 지표에는 `or vector(0)`.** `k6_dropped_iterations_total` 은 drop 이 생기기 전에는 시계열이 없고, 5xx 가 없으면 오류율 분자가 비어 패널이 빈다.
+- **DB CPU 는 iowait 를 따로 본다.** `100 - idle` 은 디스크를 기다리는 시간(iowait)까지 사용 중으로 센다. DB VM 은 체크인 commit 마다 디스크 동기화가 생기고 디스크를 ASTRA 호스트의 다른 VM 과 함께 쓰므로, CPU 가 차 보여도 실제로는 디스크 쓰기 대기일 수 있다 (ORBIT-CLOUD-LABS/orbit#23 `T_db`: 'CPU 96~100%' 중 약 40% 가 iowait)
 - **`k6_vus` 는 일하는 VU 수다.** arrival-rate 실행에서 부하가 작고 응답이 빠르면 0 에 가깝다. 준비된 VU 는 `k6_vus_max`.
 - **서버 JVM 은 Serial GC 다.** CPU limit 이 2 CPU 미만(현재 500m)이면 JVM 이 Serial GC 를 고른다 (`gc="Copy"`·`"MarkSweepCompact"`, 메모리 영역 `Eden Space`·`Survivor Space`·`Tenured Gen`). CPU limit 을 바꾸면 GC 종류와 지표 값이 함께 바뀔 수 있다.
 
