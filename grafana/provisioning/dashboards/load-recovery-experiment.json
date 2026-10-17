@@ -46,19 +46,19 @@
       "id": 2,
       "type": "timeseries",
       "title": "HPA 현재 / 목표 사용률",
-      "description": "Phase1 HPA는 CPU 기준 단일 지표라 metric_name=\"cpu\" 시계열 하나만 예상된다. orbit-server#.. CPU request/limit 확정 전까지는 목표 사용률(spec_target_metric) 자체가 임시값일 수 있다.",
+      "description": "Phase1 HPA는 CPU 기준 단일 지표라 metric_name=\"cpu\" 시계열 하나만 예상된다. orbit-server#.. CPU request/limit 확정 전까지는 목표 사용률(spec_target_metric) 자체가 임시값일 수 있다. 현재 사용률은 kube-state-metrics의 status_target_metric을 쓴다(status_current_metrics는 수집되지 않음). 이 지표는 utilization(%)과 average(코어 수)를 함께 내보내므로 metric_target_type=\"utilization\"으로 거른다.",
       "gridPos": { "x": 12, "y": 1, "w": 12, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "percent" }, "overrides": [] },
       "targets": [
         {
           "refId": "A",
-          "expr": "kube_horizontalpodautoscaler_status_current_metrics{namespace=\"orbit\"}",
+          "expr": "kube_horizontalpodautoscaler_status_target_metric{namespace=\"orbit\", metric_target_type=\"utilization\"}",
           "legendFormat": "current {{metric_name}}"
         },
         {
           "refId": "B",
-          "expr": "kube_horizontalpodautoscaler_spec_target_metric{namespace=\"orbit\"}",
+          "expr": "kube_horizontalpodautoscaler_spec_target_metric{namespace=\"orbit\", metric_target_type=\"utilization\"}",
           "legendFormat": "target {{metric_name}}"
         },
         {
