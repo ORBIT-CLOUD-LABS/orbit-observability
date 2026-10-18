@@ -5,10 +5,28 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+# 알림 (orbit-observability#29)
+# Alertmanager 는 같은 VM 의 9093 이다. localhost 로 보내므로 ufw 규칙이 필요 없다.
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["localhost:9093"]
+
+# 규칙 파일은 이 레포 prometheus/rules/ 를 VM 의 /etc/prometheus/rules/ 로 복사해 쓴다.
+# evaluation_interval(15s)보다 긴 간격이 필요한 그룹은 규칙 파일 안에서 interval 로 지정한다.
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
 scrape_configs:
   - job_name: prometheus
     static_configs:
       - targets: ["localhost:9090"]
+
+  # Alertmanager 자신도 수집한다. 이게 없으면 Alertmanager 가 죽어도 up 시계열이 없어
+  # TargetDown 규칙이 감지하지 못한다.
+  - job_name: alertmanager
+    static_configs:
+      - targets: ["localhost:9093"]
 
   # HPA scale-out/in 시점을 놓치지 않기 위해 global(15s)보다 촘촘한 5s로 수집한다 (orbit-observability#7).
   - job_name: node

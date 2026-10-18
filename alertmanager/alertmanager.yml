@@ -1,0 +1,66 @@
+# 모니터링 VM(192.168.100.107)의 /etc/alertmanager/alertmanager.yml 로 복사해 사용한다.
+# 배포 방식: apt 패키지(prometheus-alertmanager) + systemd (Docker Compose 아님).
+# Prometheus·Loki·Grafana 와 같은 방식이다 (AGENTS.md 핵심 규칙).
+#
+# 수신처는 슬랙 #5-alerts 다 (orbit-observability#29, 2026-10-19 결정).
+# 모니터링 VM 에서 외부 egress 가 열려 있는 것을 확인했다 (https://slack.com -> 200).
+#
+# 패키지 버전은 0.26.0 (Ubuntu). matchers / source_matchers(0.22+), api_url_file(0.25+)
+# 모두 동작한다. 설치 후 `alertmanager --version` 으로 확인한다.
+
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: orbit-default
+
+  # 같은 원인으로 한꺼번에 터지는 알림을 한 통으로 묶는다.
+  # namespace 를 넣는 이유: orbit namespace 작업과 클러스터 전역 알림을 섞지 않는다.
+  group_by: [alertname, namespace]
+  group_wait: 30s
+  group_interval: 5m
+
+  # 미해결 알림 재통지 간격. 부하 실험 중 같은 알림이 반복 통지돼 묻히지 않도록 길게 둔다.
+  repeat_interval: 12h
+
+  routes:
+    # Watchdog 는 "알림 경로가 살아있다" 를 증명하기 위해 항상 발화한다. 사람에게 보내지 않는다.
+    - receiver: orbit-null
+      matchers:
+        - severity = none
+      group_wait: 0s
+      repeat_interval: 1h
+
+inhibit_rules:
+  # target 이 내려가면 그 target 의 지표를 쓰는 알림이 함께 터진다(또는 값이 사라져 오탐이 된다).
+  # 원인 알림(TargetDown)만 남기고 같은 instance 의 warning 은 누른다.
+  - source_matchers:
+      - alertname = TargetDown
+    target_matchers:
+      - severity = warning
+    equal: [instance]
+
+receivers:
+  # 슬랙 #5-alerts 로 통지한다. 비밀값(webhook URL)은 커밋하지 않고 VM 파일에만 둔다
+  # (/etc/alertmanager/slack-webhook-url). api_url_file 은 0.25+ 에서 동작한다.
+  # 파일 소유자는 Alertmanager 서비스 계정(Ubuntu 패키지: prometheus)이어야 한다.
+  # root:root 0600 으로 두면 통지 시점에 permission denied 로 실패한다 (README 참고).
+  - name: orbit-default
+    slack_configs:
+      - api_url_file: /etc/alertmanager/slack-webhook-url
+        send_resolved: true
+
+        # Incoming Webhook 은 설치할 때 고른 채널로 고정되고 payload 의 channel 은 무시된다.
+        # 받는 채널이 어디인지 설정만 보고 알 수 있도록 적어 둔다.
+        channel: "#5-alerts"
+
+        color: '{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}'
+        title: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}'
+        text: >-
+          {{ range .Alerts }}{{ .Annotations.summary }}
+          {{ with .Annotations.description }}{{ . }}
+          {{ end }}{{ with .Annotations.runbook_url }}Runbook: {{ . }}
+          {{ end }}{{ end }}
+
+  # Watchdog 전용 sink.
+  - name: orbit-null

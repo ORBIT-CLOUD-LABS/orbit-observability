@@ -1,0 +1,162 @@
+# 모니터링 VM(192.168.100.107)의 /etc/prometheus/rules/alerts.yml 로 복사해 사용한다.
+# prometheus.yml 의 rule_files 가 /etc/prometheus/rules/*.yml 을 읽는다.
+#
+# 규칙에 쓰는 지표는 docs/monitoring-targets.md 의 "실험 질문별 대상" 에서 가져왔다.
+# 클러스터 지표(cAdvisor·kube-state-metrics)는 Alloy 를 지나며 걸러지므로, 그 허용목록에
+# 있는 지표·label 만 쓸 수 있다 (orbit-gitops platform/alloy/config.alloy):
+#   - cAdvisor: container_cpu_usage_seconds_total, container_cpu_cfs_periods_total,
+#     container_cpu_cfs_throttled_periods_total, container_memory_working_set_bytes 만 통과한다
+#   - label: namespace·app·pod·node·job·instance·deployment·container·condition 등 허용목록만 남는다
+#   - node_exporter 지표는 Prometheus 가 직접 scrape 하므로 label 제한이 없다
+#
+# 임계값과 for 는 1차 제안값이다. 실험 결과(ORBIT-CLOUD-LABS/orbit#23)로 확정하기 전까지
+# 확정값처럼 다루지 않는다.
+#
+# runbook_url 은 orbit 레포의 docs/runbook-alerts.md 의 알림별 절을 가리킨다
+# (ORBIT-CLOUD-LABS/orbit#47). 그 문서의 절 제목이 알림 이름과 1:1 이므로 anchor 를
+# 그대로 쓴다. 알림을 추가하면 그 문서에도 절을 추가한다.
+
+groups:
+  # ---------- 수집 경로 자체 ----------
+  - name: targets
+    interval: 30s
+    rules:
+      - alert: Watchdog
+        # 항상 발화한다. 이 알림이 Alertmanager 에서 사라지면 Prometheus→Alertmanager
+        # 경로나 Prometheus 자체가 죽은 것이다. 사람에게 보내지 않는다(route 에서 orbit-null).
+        expr: vector(1)
+        labels:
+          severity: none
+        annotations:
+          summary: "알림 경로 생존 신호 (항상 발화)"
+          runbook_url: "https://github.com/ORBIT-CLOUD-LABS/orbit/blob/main/docs/runbook-alerts.md#watchdog"
+
+      - alert: TargetDown
+        # node_exporter(5s scrape), Alloy 가 보내는 kubelet·kube-state-metrics scrape,
+        # Prometheus·Alertmanager 자신까지 모든 up 시계열을 한 규칙으로 덮는다.
+        # job 별로 쪼개지 않는 이유: Alloy 가 붙이는 job·instance 값에 의존하지 않게 한다.
+        expr: up == 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "수집 대상 다운: {{ $labels.job }} / {{ $labels.instance }} (10분 이상 up=0)"
+          description: "node_exporter 중단, Alloy remote write 중단, Prometheus 수신 거부 중 하나다. 어디가 끊겼는지 가르는 절차는 Runbook."
+          runbook_url: "https://github.com/ORBIT-CLOUD-LABS/orbit/blob/main/docs/runbook-alerts.md#targetdown"
+
+      - alert: RemoteWriteRejected
+        # 이 레포·orbit-gitops 가 반복해서 겪은 장애 유형이다: label 붕괴로 duplicate sample 이
+        # 생기면 Prometheus 2.45 는 write 배치를 통째로 Rollback 해서, 정상 샘플까지 사라진다
+        # (orbit-gitops#35, #38). 패널이 비는 모습으로만 드러나 발견이 늦었으므로 알림으로 잡는다.
+        expr: sum(rate(prometheus_http_requests_total{handler="/api/v1/write",code=~"4..|5.."}[5m])) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "remote write 거부 발생 (5분 평균 {{ $value | printf \"%.3f\" }} req/s)"
+          description: "Alloy·k6 가 보낸 write 가 거부되고 있다. label 허용목록 변경 직후면 그 변경을 먼저 의심한다."
+          runbook_url: "https://github.com/ORBIT-CLOUD-LABS/orbit/blob/main/docs/runbook-alerts.md#remotewriterejected"
+
+  # ---------- 클러스터 워크로드 ----------
+  - name: kubernetes
+    interval: 30s
+    rules:
+      - alert: PodNotReady
+        expr: kube_pod_status_ready{namespace="orbit",condition="true"} == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pod Ready 아님: {{ $labels.namespace }}/{{ $labels.pod }} (10분 이상)"
+          runbook_url: "https://github.com/ORBIT-CLOUD-LABS/orbit/blob/main/docs/runbook-alerts.md#podnotready"
+
+      - alert: DeploymentReplicasUnavailable
+        # HPA scale-out 중에는 일시적으로 available < spec 이 정상이라 for 를 길게 둔다.
+        expr: kube_deployment_status_replicas_available{namespace="orbit"} < kube_deployment_spec_replicas{namespace="orbit"}
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Deployment replica 부족: {{ $labels.namespace }}/{{ $labels.deployment }} ({{ $value }} available)"
+          runbook_url: "https://github.com/ORBIT-CLOUD-LABS/orbit/blob/main/docs/runbook-alerts.md#deploymentreplicasunavailable"
+
+      - alert: ContainerRestartingRepeatedly
+        expr: increase(kube_pod_container_status_restarts_total{namespace="orbit"}[15m]) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "컨테이너 반복 재시작: {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} (15분간 {{ $value }}회)"
+          runbook_url: "https://github.com/ORBIT-CLOUD-LABS/orbit/blob/main/docs/runbook-alerts.md#containerrestartingrepeatedly"
+
+      - alert: ContainerCpuThrottlingHigh
+        # orbit#23 에서 확정한 request 500m / limit 750m 기준으로, 평상시 throttling 이
+        # 지속되면 limit 이 작다는 신호다. 부하 실험 중에는 의도된 상태일 수 있어 for 를 길게 둔다.
+        expr: |
+          rate(container_cpu_cfs_throttled_periods_total{namespace="orbit",container!=""}[5m])
+            / rate(container_cpu_cfs_periods_total{namespace="orbit",container!=""}[5m]) > 0.25
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CPU throttling 지속: {{ $labels.namespace }}/{{ $labels.pod }} ({{ $value | humanizePercentage }})"
+          runbook_url: "https://github.com/ORBIT-CLOUD-LABS/orbit/blob/main/docs/runbook-alerts.md#containercputhrottlinghigh"
+
+  # ---------- 차량 API (orbit-server) ----------
+  - name: orbit-server
+    interval: 30s
+    rules:
+      - alert: VehicleApiErrorRateHigh
+        # 판정 패널과 같은 기준으로 차량 API 만 본다. health probe·/actuator/prometheus 는 제외
+        # (docs/monitoring-targets.md "차량 API 만 본다").
+        expr: |
+          sum(rate(http_server_requests_seconds_count{uri=~"/api/v1/vehicles/[{]vehicleId[}]/.*",status=~"5.."}[5m]))
+            / sum(rate(http_server_requests_seconds_count{uri=~"/api/v1/vehicles/[{]vehicleId[}]/.*"}[5m])) > 0.01
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "차량 API 5xx 비율 {{ $value | humanizePercentage }} (10분 이상 1% 초과)"
+          runbook_url: "https://github.com/ORBIT-CLOUD-LABS/orbit/blob/main/docs/runbook-alerts.md#vehicleapierrorratehigh"
+
+      - alert: VehicleApiLatencyP95High
+        # 임계값 1s 는 1차 제안값이다. orbit#23 실험 결과로 확정한다.
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(http_server_requests_seconds_bucket{uri=~"/api/v1/vehicles/[{]vehicleId[}]/.*"}[5m]))
+          ) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "차량 API P95 {{ $value | printf \"%.3f\" }}s (10분 이상 1s 초과)"
+          runbook_url: "https://github.com/ORBIT-CLOUD-LABS/orbit/blob/main/docs/runbook-alerts.md#vehicleapilatencyp95high"
+
+      - alert: HikariConnectionsPending
+        # DB 가 먼저 막혔는지 보는 지표. pending 이 지속되면 커넥션 풀이 병목이다.
+        expr: hikaricp_connections_pending > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Hikari 커넥션 대기 {{ $value }}건 지속 ({{ $labels.pool }})"
+          description: "DB VM CPU 의 iowait 비중을 함께 본다. 'CPU 높음' 이 실제로는 디스크 쓰기 대기일 수 있다 (orbit#23 T_db)."
+          runbook_url: "https://github.com/ORBIT-CLOUD-LABS/orbit/blob/main/docs/runbook-alerts.md#hikariconnectionspending"
+
+  # ---------- VM·호스트 ----------
+  - name: nodes
+    interval: 30s
+    rules:
+      - alert: NodeDiskSpaceLow
+        # mountpoint 를 지정하지 않는 이유: 모니터링 VM data disk 를 포함한 모든 VM 의
+        # 실제 마운트 경로를 아직 확인하지 않았다. 전체를 비율로 본다.
+        # 모니터링 VM 은 보존 15일 설정(--storage.tsdb.retention.time=15d)과 함께 본다.
+        expr: |
+          100 * node_filesystem_avail_bytes{fstype!~"tmpfs|squashfs|overlay|ramfs"}
+            / node_filesystem_size_bytes{fstype!~"tmpfs|squashfs|overlay|ramfs"} < 15
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "디스크 여유 {{ $value | printf \"%.1f\" }}%: {{ $labels.instance }} {{ $labels.mountpoint }}"
+          runbook_url: "https://github.com/ORBIT-CLOUD-LABS/orbit/blob/main/docs/runbook-alerts.md#nodediskspacelow"
