@@ -2,13 +2,11 @@
 # 배포 방식: apt 패키지(prometheus-alertmanager) + systemd (Docker Compose 아님).
 # Prometheus·Loki·Grafana 와 같은 방식이다 (AGENTS.md 핵심 규칙).
 #
-# 수신처는 아직 정하지 않았다 (orbit-observability#29, needs:decision).
-# 모니터링 VM 의 외부 egress 가능 여부가 확인되기 전까지 기본 receiver 를 비워 두고,
-# 알림은 Alertmanager UI·API(:9093)에만 남긴다. 발화·그룹핑·inhibit·silence 는
-# 수신처가 없어도 모두 동작하므로, 이 상태로도 알림 경로 검증은 끝낼 수 있다.
+# 수신처는 디스코드다 (orbit-observability#29, 2026-10-19 결정).
+# 모니터링 VM 에서 외부 egress 가 열려 있는 것을 확인했다 (https://slack.com -> 200).
 #
-# matchers / source_matchers 문법은 Alertmanager 0.22 이상에서만 동작한다.
-# 설치 후 `alertmanager --version` 으로 확인한다.
+# 패키지 버전은 0.26.0 (Ubuntu). matchers / source_matchers(0.22+), api_url_file(0.25+)
+# 모두 동작한다. 설치 후 `alertmanager --version` 으로 확인한다.
 
 global:
   resolve_timeout: 5m
@@ -43,26 +41,29 @@ inhibit_rules:
     equal: [instance]
 
 receivers:
-  # 수신처 미정 상태의 sink. 이름만 있는 receiver 는 유효하며, 알림은 UI·API 에만 남는다.
+  # 디스코드로 통지한다. 비밀값(webhook URL)은 커밋하지 않고 VM 파일에만 둔다
+  # (/etc/alertmanager/discord-webhook-url, 0600 root:root).
+  #
+  # discord_configs 를 쓰지 않는 이유: 0.26.0 의 discord_configs 에는 webhook_url 만 있고
+  # webhook_url_file 이 없어서(0.28.0 에서 추가됨) URL 이 이 파일에 박힌다. 디스코드는
+  # webhook URL 뒤에 /slack 을 붙이면 Slack 호환 payload 를 받으므로, api_url_file 을
+  # 지원하는 slack_configs 로 보낸다. VM 파일에 저장하는 URL 끝에 /slack 을 포함한다.
+  # Alertmanager 를 0.28 이상으로 올리면 discord_configs + webhook_url_file 로 바꾼다.
   - name: orbit-default
+    slack_configs:
+      - api_url_file: /etc/alertmanager/discord-webhook-url
+        send_resolved: true
+
+        # 디스코드는 Slack 의 channel·icon_emoji·mrkdwn·mrkdwn_in 을 무시한다.
+        # 실제 채널은 webhook 자체가 정한다. channel 은 Slack 스키마용으로만 둔다.
+        channel: "#orbit-alerts"
+
+        title: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}'
+        text: >-
+          {{ range .Alerts }}{{ .Annotations.summary }}
+          {{ with .Annotations.description }}{{ . }}
+          {{ end }}{{ with .Annotations.runbook_url }}Runbook: {{ . }}
+          {{ end }}{{ end }}
 
   # Watchdog 전용 sink.
   - name: orbit-null
-
-# 수신처가 정해지면 orbit-default 를 아래 형태로 채운다.
-# 비밀값(webhook URL·SMTP 비밀번호)은 커밋하지 않는다. VM 에 파일로 두고 *_file 로 참조한다
-# (예: /etc/alertmanager/slack-webhook-url, 0600 root:alertmanager).
-# api_url_file 은 Alertmanager 0.25 이상에서 지원한다. 그보다 낮으면 파일 참조가 불가하니
-# 버전을 먼저 확인하고, 불가하면 수신처 방식을 다시 정한다.
-#
-# receivers:
-#   - name: orbit-default
-#     slack_configs:
-#       - api_url_file: /etc/alertmanager/slack-webhook-url
-#         channel: "#orbit-alerts"
-#         send_resolved: true
-#         title: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}'
-#         text: >-
-#           {{ range .Alerts }}{{ .Annotations.summary }}
-#           {{ .Annotations.runbook_url }}
-#           {{ end }}

@@ -11,7 +11,7 @@ Prometheus가 규칙을 평가해 알림을 만들고(`prometheus/rules/`), Aler
 ```bash
 sudo apt update
 sudo apt install -y prometheus-alertmanager
-alertmanager --version   # 0.22 이상이어야 matchers 문법이 동작한다
+alertmanager --version   # Ubuntu 패키지 0.26.0 확인 (matchers 0.22+, api_url_file 0.25+)
 ```
 
 ## 배포
@@ -59,37 +59,62 @@ amtool check-config /etc/alertmanager/alertmanager.yml
 
 `promtool`은 `prometheus` 패키지에, `amtool`은 `prometheus-alertmanager` 패키지에 들어 있다.
 
-## 수신처
+## 수신처 (디스코드)
 
-현재 기본 receiver(`orbit-default`)는 **비어 있다**. 알림은 Alertmanager UI·API에만 남고
-어디로도 전송되지 않는다. 수신처는 모니터링 VM의 외부 egress 가능 여부에 달려 있어
-orbit-observability#29에서 결정한다.
+디스코드 채널로 통지한다. 모니터링 VM 에서 외부 egress 가 열려 있는 것을 확인했다
+(`https://slack.com` → 200).
 
-```bash
-curl -sS -o /dev/null -w '%{http_code}\n' --max-time 8 https://slack.com
-```
-
-정해지면 `alertmanager.yml` 아래쪽 주석의 형태로 채운다. **비밀값(webhook URL·SMTP 비밀번호)은
-커밋하지 않는다.** VM에 파일로 두고 `*_file`로 참조한다.
+**비밀값(webhook URL)은 커밋하지 않는다.** VM 파일에만 두고 `api_url_file` 로 참조한다.
 
 ```bash
-sudo install -m 0600 -o root -g root /dev/null /etc/alertmanager/slack-webhook-url
-sudo tee /etc/alertmanager/slack-webhook-url >/dev/null <<< '<webhook URL>'
+# 디스코드: 채널 설정 → 연동 → 웹후크 → 새 웹후크 → URL 복사
+# URL 끝에 /slack 을 붙여서 저장한다 (Slack 호환 엔드포인트)
+sudo install -m 0600 -o root -g root /dev/null /etc/alertmanager/discord-webhook-url
+printf '%s' 'https://discord.com/api/webhooks/<id>/<token>/slack' | sudo tee /etc/alertmanager/discord-webhook-url >/dev/null
+sudo chmod 0600 /etc/alertmanager/discord-webhook-url
+sudo systemctl restart prometheus-alertmanager
 ```
+
+`discord_configs` 대신 `slack_configs` 를 쓰는 이유는 `alertmanager.yml` 주석에 있다:
+0.26.0 의 `discord_configs` 에는 `webhook_url_file` 이 없어서(0.28.0 에서 추가) URL 이
+설정 파일에 박힌다. 디스코드의 Slack 호환 엔드포인트(`/slack`)를 쓰면 `api_url_file` 로 뺄 수 있다.
+
+전송 확인:
+
+```bash
+# webhook URL 자체가 살아있는지 (디스코드 채널에 "ping" 이 올라온다)
+curl -sS -o /dev/null -w '%{http_code}
+' -H 'Content-Type: application/json'   -d '{"text":"orbit alertmanager ping"}' "$(sudo cat /etc/alertmanager/discord-webhook-url)"
+
+# Alertmanager 가 실제로 보냈는지 (실패하면 여기 로그에 남는다)
+journalctl -u prometheus-alertmanager -n 50 --no-pager | grep -i notify
+```
+
+디스코드의 Slack 호환 엔드포인트가 `attachments` 를 거부해 400 을 내는 사례 보고가 있다.
+`journalctl` 에 `unexpected status code 400` 이 보이면 `title`·`text` 가 빈 알림이 섞였는지
+확인하고, 그래도 안 되면 Alertmanager 를 0.28 이상으로 올려 `discord_configs` +
+`webhook_url_file` 로 전환한다.
 
 ## 접근 범위 (ufw)
 
-Prometheus→Alertmanager는 같은 VM의 루프백이라 **방화벽 규칙이 필요 없다**.
-UI·API를 VM 밖에서 볼 때만 9093을 연다. silence 조작이 가능한 엔드포인트라,
-Grafana(3000, 현재 Anywhere)보다 Prometheus(9090, 출발지 한정) 쪽 패턴을 따른다.
+Prometheus→Alertmanager 는 같은 VM 의 루프백이라 그 경로에는 방화벽 규칙이 필요 없다.
+UI·API 를 VM 밖에서 보기 위해 **Tailscale 출발지만** 허용한다 (orbit-observability#29 결정).
+silence 조작이 가능한 엔드포인트라 Grafana(3000, 현재 Anywhere)보다 Prometheus(9090,
+출발지 한정) 쪽 패턴을 따른다.
+
+ASTRA 밖 장비는 subnet router 를 지나며 `192.168.100.1` 로 보인다 (`prometheus/README.md`).
 
 ```bash
-sudo ufw status numbered                                   # DENY 규칙 번호 확인
-sudo ufw insert <번호> allow from <출발지> to any port 9093 proto tcp comment "alertmanager UI (orbit-observability#29)"
+sudo ufw allow from 192.168.100.1 to any port 9093 proto tcp comment "alertmanager UI via tailscale (orbit-observability#29)"
+sudo ufw deny 9093/tcp
+sudo ufw status numbered | grep 9093
 ```
 
-`ufw allow`는 규칙을 맨 뒤에 붙여 기존 deny에 먼저 걸리므로 `insert`로 끼워 넣는다
-(`prometheus/README.md`와 같은 함정). 이 규칙의 코드화는 orbit-infrastructure#62에서 다룬다.
+9093 에는 기존 deny 규칙이 없어서(2026-10-19 `ufw status numbered` 확인) allow 를 먼저 추가하면
+그 뒤에 deny 가 붙어 순서가 맞는다. 9090·9100 처럼 **이미 deny 가 있는 포트에 출발지를 추가할
+때는** `ufw allow` 가 규칙을 맨 뒤에 붙여 deny 에 먼저 걸리므로 `ufw insert <deny 번호>` 를 써야 한다.
+
+이 규칙의 코드화는 orbit-infrastructure#62 에서 다룬다.
 
 ## 발화 테스트
 
