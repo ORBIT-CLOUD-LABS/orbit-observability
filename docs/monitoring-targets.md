@@ -74,6 +74,6 @@ remote write 9090 은 k8s 노드 4대와 `192.168.100.1` 에서만 받는다. AS
 
 | 대상 | 이유 |
 | --- | --- |
-| DB 내부 지표 (QPS·잠금 대기) | 아직 없음. 필요하면 mysqld_exporter 를 검토한다 (설치는 orbit-infrastructure) |
+| DB 내부 지표 (QPS·잠금 대기) | Phase1 에서는 넣지 않는다 (#24, 2026-10-18 결론). ORBIT-CLOUD-LABS/orbit#23 측정에서 병목을 전부 기존 수집으로 짚었다 — DB CPU·iowait 는 node_exporter, 연결 점유는 Hikari, "DB 는 여유인데 Hikari 대기가 쌓인" 유일한 사례는 cAdvisor 로 본 Pod CPU throttling 이었다. 재개 조건은 셋 중 하나다: DB CPU·iowait 가 여유인데 Hikari 대기가 늘고 서버 throttling 도 없을 때 / 특정 API 만 실패·타임아웃일 때 / Phase2 쓰기 부하로 버퍼풀·binlog·느린 쿼리를 봐야 할 때. 그때 mysqld_exporter 를 검토한다 (설치와 읽기 전용 DB 계정은 orbit-infrastructure) |
 | Nginx 전용 exporter | `stub_status` 는 연결 수만 준다. HIT/MISS 는 JSON access log 를 Loki 로 집계한다 |
 | Jenkins·Argo CD 메트릭 | 실험 질문과 무관하다. node_exporter 기본 상태만 본다 |
