@@ -2,7 +2,7 @@
 # 배포 방식: apt 패키지(prometheus-alertmanager) + systemd (Docker Compose 아님).
 # Prometheus·Loki·Grafana 와 같은 방식이다 (AGENTS.md 핵심 규칙).
 #
-# 수신처는 디스코드다 (orbit-observability#29, 2026-10-19 결정).
+# 수신처는 슬랙 #5-alerts 다 (orbit-observability#29, 2026-10-19 결정).
 # 모니터링 VM 에서 외부 egress 가 열려 있는 것을 확인했다 (https://slack.com -> 200).
 #
 # 패키지 버전은 0.26.0 (Ubuntu). matchers / source_matchers(0.22+), api_url_file(0.25+)
@@ -41,23 +41,18 @@ inhibit_rules:
     equal: [instance]
 
 receivers:
-  # 디스코드로 통지한다. 비밀값(webhook URL)은 커밋하지 않고 VM 파일에만 둔다
-  # (/etc/alertmanager/discord-webhook-url, 0600 root:root).
-  #
-  # discord_configs 를 쓰지 않는 이유: 0.26.0 의 discord_configs 에는 webhook_url 만 있고
-  # webhook_url_file 이 없어서(0.28.0 에서 추가됨) URL 이 이 파일에 박힌다. 디스코드는
-  # webhook URL 뒤에 /slack 을 붙이면 Slack 호환 payload 를 받으므로, api_url_file 을
-  # 지원하는 slack_configs 로 보낸다. VM 파일에 저장하는 URL 끝에 /slack 을 포함한다.
-  # Alertmanager 를 0.28 이상으로 올리면 discord_configs + webhook_url_file 로 바꾼다.
+  # 슬랙 #5-alerts 로 통지한다. 비밀값(webhook URL)은 커밋하지 않고 VM 파일에만 둔다
+  # (/etc/alertmanager/slack-webhook-url, 0600 root:root). api_url_file 은 0.25+ 에서 동작한다.
   - name: orbit-default
     slack_configs:
-      - api_url_file: /etc/alertmanager/discord-webhook-url
+      - api_url_file: /etc/alertmanager/slack-webhook-url
         send_resolved: true
 
-        # 디스코드는 Slack 의 channel·icon_emoji·mrkdwn·mrkdwn_in 을 무시한다.
-        # 실제 채널은 webhook 자체가 정한다. channel 은 Slack 스키마용으로만 둔다.
-        channel: "#orbit-alerts"
+        # Incoming Webhook 은 설치할 때 고른 채널로 고정되고 payload 의 channel 은 무시된다.
+        # 받는 채널이 어디인지 설정만 보고 알 수 있도록 적어 둔다.
+        channel: "#5-alerts"
 
+        color: '{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}'
         title: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}'
         text: >-
           {{ range .Alerts }}{{ .Annotations.summary }}

@@ -59,41 +59,39 @@ amtool check-config /etc/alertmanager/alertmanager.yml
 
 `promtool`은 `prometheus` 패키지에, `amtool`은 `prometheus-alertmanager` 패키지에 들어 있다.
 
-## 수신처 (디스코드)
+## 수신처 (슬랙 #5-alerts)
 
-디스코드 채널로 통지한다. 모니터링 VM 에서 외부 egress 가 열려 있는 것을 확인했다
+슬랙 `#5-alerts` 채널로 통지한다. 모니터링 VM 에서 외부 egress 가 열려 있는 것을 확인했다
 (`https://slack.com` → 200).
 
-**비밀값(webhook URL)은 커밋하지 않는다.** VM 파일에만 두고 `api_url_file` 로 참조한다.
+**비밀값(webhook URL)은 커밋하지 않는다.** VM 파일에만 두고 `api_url_file`(0.25+) 로 참조한다.
 
 ```bash
-# 디스코드: 채널 설정 → 연동 → 웹후크 → 새 웹후크 → URL 복사
-# URL 끝에 /slack 을 붙여서 저장한다 (Slack 호환 엔드포인트)
-sudo install -m 0600 -o root -g root /dev/null /etc/alertmanager/discord-webhook-url
-printf '%s' 'https://discord.com/api/webhooks/<id>/<token>/slack' | sudo tee /etc/alertmanager/discord-webhook-url >/dev/null
-sudo chmod 0600 /etc/alertmanager/discord-webhook-url
+# https://api.slack.com/apps → 해당 앱 → Incoming Webhooks → #5-alerts 용 URL 복사
+sudo touch /etc/alertmanager/slack-webhook-url
+sudo chown root:root /etc/alertmanager/slack-webhook-url
+sudo chmod 0600 /etc/alertmanager/slack-webhook-url
+sudo tee /etc/alertmanager/slack-webhook-url >/dev/null   # URL 붙여넣고 Enter, Ctrl-D
 sudo systemctl restart prometheus-alertmanager
 ```
 
-`discord_configs` 대신 `slack_configs` 를 쓰는 이유는 `alertmanager.yml` 주석에 있다:
-0.26.0 의 `discord_configs` 에는 `webhook_url_file` 이 없어서(0.28.0 에서 추가) URL 이
-설정 파일에 박힌다. 디스코드의 Slack 호환 엔드포인트(`/slack`)를 쓰면 `api_url_file` 로 뺄 수 있다.
+셸 히스토리에 URL 이 남지 않도록 `tee` 표준입력으로 붙여넣는다. 파일 끝의 개행은 Alertmanager
+가 잘라내므로 문제되지 않는다.
 
 전송 확인:
 
 ```bash
-# webhook URL 자체가 살아있는지 (디스코드 채널에 "ping" 이 올라온다)
+# webhook URL 자체가 살아있는지 (#5-alerts 에 "ping" 이 올라온다)
 curl -sS -o /dev/null -w '%{http_code}
-' -H 'Content-Type: application/json'   -d '{"text":"orbit alertmanager ping"}' "$(sudo cat /etc/alertmanager/discord-webhook-url)"
+' -H 'Content-Type: application/json'   -d '{"text":"orbit alertmanager ping"}' "$(sudo cat /etc/alertmanager/slack-webhook-url)"
 
 # Alertmanager 가 실제로 보냈는지 (실패하면 여기 로그에 남는다)
 journalctl -u prometheus-alertmanager -n 50 --no-pager | grep -i notify
 ```
 
-디스코드의 Slack 호환 엔드포인트가 `attachments` 를 거부해 400 을 내는 사례 보고가 있다.
-`journalctl` 에 `unexpected status code 400` 이 보이면 `title`·`text` 가 빈 알림이 섞였는지
-확인하고, 그래도 안 되면 Alertmanager 를 0.28 이상으로 올려 `discord_configs` +
-`webhook_url_file` 로 전환한다.
+`invalid_token` 이나 404 가 오면 URL 이 폐기된 것이고, `channel_not_found` 는 앱이 그 채널에
+초대되지 않은 것이다. Incoming Webhook 은 설치할 때 고른 채널로 고정되므로
+`alertmanager.yml` 의 `channel` 값을 바꿔도 전송 대상은 바뀌지 않는다 — 기록용 값이다.
 
 ## 접근 범위 (ufw)
 
