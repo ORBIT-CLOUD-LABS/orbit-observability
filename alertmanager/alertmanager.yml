@@ -1,0 +1,68 @@
+# 모니터링 VM(192.168.100.107)의 /etc/alertmanager/alertmanager.yml 로 복사해 사용한다.
+# 배포 방식: apt 패키지(prometheus-alertmanager) + systemd (Docker Compose 아님).
+# Prometheus·Loki·Grafana 와 같은 방식이다 (AGENTS.md 핵심 규칙).
+#
+# 수신처는 아직 정하지 않았다 (orbit-observability#29, needs:decision).
+# 모니터링 VM 의 외부 egress 가능 여부가 확인되기 전까지 기본 receiver 를 비워 두고,
+# 알림은 Alertmanager UI·API(:9093)에만 남긴다. 발화·그룹핑·inhibit·silence 는
+# 수신처가 없어도 모두 동작하므로, 이 상태로도 알림 경로 검증은 끝낼 수 있다.
+#
+# matchers / source_matchers 문법은 Alertmanager 0.22 이상에서만 동작한다.
+# 설치 후 `alertmanager --version` 으로 확인한다.
+
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: orbit-default
+
+  # 같은 원인으로 한꺼번에 터지는 알림을 한 통으로 묶는다.
+  # namespace 를 넣는 이유: orbit namespace 작업과 클러스터 전역 알림을 섞지 않는다.
+  group_by: [alertname, namespace]
+  group_wait: 30s
+  group_interval: 5m
+
+  # 미해결 알림 재통지 간격. 부하 실험 중 같은 알림이 반복 통지돼 묻히지 않도록 길게 둔다.
+  repeat_interval: 12h
+
+  routes:
+    # Watchdog 는 "알림 경로가 살아있다" 를 증명하기 위해 항상 발화한다. 사람에게 보내지 않는다.
+    - receiver: orbit-null
+      matchers:
+        - severity = none
+      group_wait: 0s
+      repeat_interval: 1h
+
+inhibit_rules:
+  # target 이 내려가면 그 target 의 지표를 쓰는 알림이 함께 터진다(또는 값이 사라져 오탐이 된다).
+  # 원인 알림(TargetDown)만 남기고 같은 instance 의 warning 은 누른다.
+  - source_matchers:
+      - alertname = TargetDown
+    target_matchers:
+      - severity = warning
+    equal: [instance]
+
+receivers:
+  # 수신처 미정 상태의 sink. 이름만 있는 receiver 는 유효하며, 알림은 UI·API 에만 남는다.
+  - name: orbit-default
+
+  # Watchdog 전용 sink.
+  - name: orbit-null
+
+# 수신처가 정해지면 orbit-default 를 아래 형태로 채운다.
+# 비밀값(webhook URL·SMTP 비밀번호)은 커밋하지 않는다. VM 에 파일로 두고 *_file 로 참조한다
+# (예: /etc/alertmanager/slack-webhook-url, 0600 root:alertmanager).
+# api_url_file 은 Alertmanager 0.25 이상에서 지원한다. 그보다 낮으면 파일 참조가 불가하니
+# 버전을 먼저 확인하고, 불가하면 수신처 방식을 다시 정한다.
+#
+# receivers:
+#   - name: orbit-default
+#     slack_configs:
+#       - api_url_file: /etc/alertmanager/slack-webhook-url
+#         channel: "#orbit-alerts"
+#         send_resolved: true
+#         title: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}'
+#         text: >-
+#           {{ range .Alerts }}{{ .Annotations.summary }}
+#           {{ .Annotations.runbook_url }}
+#           {{ end }}
