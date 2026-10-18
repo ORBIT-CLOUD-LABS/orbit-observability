@@ -79,12 +79,20 @@ amtool check-config /etc/alertmanager/alertmanager.yml
 
 **비밀값(webhook URL)은 커밋하지 않는다.** VM 파일에만 두고 `api_url_file`(0.25+) 로 참조한다.
 
+파일 소유자는 **Alertmanager 서비스 계정**이어야 한다. Alertmanager 는 root 가 아니라
+`User=` 로 지정된 계정(Ubuntu 패키지는 `prometheus`)으로 돌기 때문에, `0600 root:root` 로
+두면 통지 시점에 `open ...: permission denied` 로 실패한다. 설정 검증(`amtool check-config`)
+으로는 안 잡히고 `journalctl` 에만 나온다.
+
 ```bash
 # https://api.slack.com/apps → 해당 앱 → Incoming Webhooks → #5-alerts 용 URL 복사
+AMUSER=$(systemctl show -p User --value prometheus-alertmanager); echo "${AMUSER:-root}"
+
 sudo touch /etc/alertmanager/slack-webhook-url
-sudo chown root:root /etc/alertmanager/slack-webhook-url
-sudo chmod 0600 /etc/alertmanager/slack-webhook-url
 sudo tee /etc/alertmanager/slack-webhook-url >/dev/null   # URL 붙여넣고 Enter, Ctrl-D
+sudo chown "${AMUSER:-root}":"${AMUSER:-root}" /etc/alertmanager/slack-webhook-url
+sudo chmod 0400 /etc/alertmanager/slack-webhook-url
+sudo chmod 0755 /etc/alertmanager                         # 서비스 계정이 디렉터리에 들어갈 수 있어야 한다
 sudo systemctl restart prometheus-alertmanager
 ```
 
@@ -102,7 +110,7 @@ curl -sS -o /dev/null -w '%{http_code}
 journalctl -u prometheus-alertmanager -n 50 --no-pager | grep -i notify
 ```
 
-`invalid_token` 이나 404 가 오면 URL 이 폐기된 것이고, `channel_not_found` 는 앱이 그 채널에
+`open ...: permission denied` 는 위의 소유자 문제다. `invalid_token` 이나 404 가 오면 URL 이 폐기된 것이고, `channel_not_found` 는 앱이 그 채널에
 초대되지 않은 것이다. Incoming Webhook 은 설치할 때 고른 채널로 고정되므로
 `alertmanager.yml` 의 `channel` 값을 바꿔도 전송 대상은 바뀌지 않는다 — 기록용 값이다.
 

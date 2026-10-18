@@ -42,7 +42,9 @@ inhibit_rules:
 
 receivers:
   # 슬랙 #5-alerts 로 통지한다. 비밀값(webhook URL)은 커밋하지 않고 VM 파일에만 둔다
-  # (/etc/alertmanager/slack-webhook-url, 0600 root:root). api_url_file 은 0.25+ 에서 동작한다.
+  # (/etc/alertmanager/slack-webhook-url). api_url_file 은 0.25+ 에서 동작한다.
+  # 파일 소유자는 Alertmanager 서비스 계정(Ubuntu 패키지: prometheus)이어야 한다.
+  # root:root 0600 으로 두면 통지 시점에 permission denied 로 실패한다 (README 참고).
   - name: orbit-default
     slack_configs:
       - api_url_file: /etc/alertmanager/slack-webhook-url
