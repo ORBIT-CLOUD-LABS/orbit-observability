@@ -10,8 +10,11 @@
 #   - node_exporter 지표는 Prometheus 가 직접 scrape 하므로 label 제한이 없다
 #
 # 임계값과 for 는 1차 제안값이다. 실험 결과(ORBIT-CLOUD-LABS/orbit#23)로 확정하기 전까지
-# 확정값처럼 다루지 않는다. runbook_url 은 대응 Runbook(ORBIT-CLOUD-LABS/orbit#47)이
-# 문서로 나오면 그 경로로 교체한다.
+# 확정값처럼 다루지 않는다.
+#
+# runbook_url 은 orbit 레포의 docs/runbook-alerts.md 의 알림별 절을 가리킨다
+# (ORBIT-CLOUD-LABS/orbit#47). 그 문서의 절 제목이 알림 이름과 1:1 이므로 anchor 를
+# 그대로 쓴다. 알림을 추가하면 그 문서에도 절을 추가한다.
 
 groups:
   # ---------- 수집 경로 자체 ----------
@@ -26,7 +29,7 @@ groups:
           severity: none
         annotations:
           summary: "알림 경로 생존 신호 (항상 발화)"
-          runbook_url: "https://github.com/ORBIT-CLOUD-LABS/orbit/issues/47"
+          runbook_url: "https://github.com/ORBIT-CLOUD-LABS/orbit/blob/main/docs/runbook-alerts.md#watchdog"
 
       - alert: TargetDown
         # node_exporter(5s scrape), Alloy 가 보내는 kubelet·kube-state-metrics scrape,
@@ -39,7 +42,7 @@ groups:
         annotations:
           summary: "수집 대상 다운: {{ $labels.job }} / {{ $labels.instance }} (10분 이상 up=0)"
           description: "node_exporter 중단, Alloy remote write 중단, Prometheus 수신 거부 중 하나다. 어디가 끊겼는지 가르는 절차는 Runbook."
-          runbook_url: "https://github.com/ORBIT-CLOUD-LABS/orbit/issues/47"
+          runbook_url: "https://github.com/ORBIT-CLOUD-LABS/orbit/blob/main/docs/runbook-alerts.md#targetdown"
 
       - alert: RemoteWriteRejected
         # 이 레포·orbit-gitops 가 반복해서 겪은 장애 유형이다: label 붕괴로 duplicate sample 이
@@ -52,7 +55,7 @@ groups:
         annotations:
           summary: "remote write 거부 발생 (5분 평균 {{ $value | printf \"%.3f\" }} req/s)"
           description: "Alloy·k6 가 보낸 write 가 거부되고 있다. label 허용목록 변경 직후면 그 변경을 먼저 의심한다."
-          runbook_url: "https://github.com/ORBIT-CLOUD-LABS/orbit/issues/47"
+          runbook_url: "https://github.com/ORBIT-CLOUD-LABS/orbit/blob/main/docs/runbook-alerts.md#remotewriterejected"
 
   # ---------- 클러스터 워크로드 ----------
   - name: kubernetes
@@ -65,7 +68,7 @@ groups:
           severity: warning
         annotations:
           summary: "Pod Ready 아님: {{ $labels.namespace }}/{{ $labels.pod }} (10분 이상)"
-          runbook_url: "https://github.com/ORBIT-CLOUD-LABS/orbit/issues/47"
+          runbook_url: "https://github.com/ORBIT-CLOUD-LABS/orbit/blob/main/docs/runbook-alerts.md#podnotready"
 
       - alert: DeploymentReplicasUnavailable
         # HPA scale-out 중에는 일시적으로 available < spec 이 정상이라 for 를 길게 둔다.
@@ -75,7 +78,7 @@ groups:
           severity: warning
         annotations:
           summary: "Deployment replica 부족: {{ $labels.namespace }}/{{ $labels.deployment }} ({{ $value }} available)"
-          runbook_url: "https://github.com/ORBIT-CLOUD-LABS/orbit/issues/47"
+          runbook_url: "https://github.com/ORBIT-CLOUD-LABS/orbit/blob/main/docs/runbook-alerts.md#deploymentreplicasunavailable"
 
       - alert: ContainerRestartingRepeatedly
         expr: increase(kube_pod_container_status_restarts_total{namespace="orbit"}[15m]) > 2
@@ -84,7 +87,7 @@ groups:
           severity: warning
         annotations:
           summary: "컨테이너 반복 재시작: {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} (15분간 {{ $value }}회)"
-          runbook_url: "https://github.com/ORBIT-CLOUD-LABS/orbit/issues/47"
+          runbook_url: "https://github.com/ORBIT-CLOUD-LABS/orbit/blob/main/docs/runbook-alerts.md#containerrestartingrepeatedly"
 
       - alert: ContainerCpuThrottlingHigh
         # orbit#23 에서 확정한 request 500m / limit 750m 기준으로, 평상시 throttling 이
@@ -97,7 +100,7 @@ groups:
           severity: warning
         annotations:
           summary: "CPU throttling 지속: {{ $labels.namespace }}/{{ $labels.pod }} ({{ $value | humanizePercentage }})"
-          runbook_url: "https://github.com/ORBIT-CLOUD-LABS/orbit/issues/47"
+          runbook_url: "https://github.com/ORBIT-CLOUD-LABS/orbit/blob/main/docs/runbook-alerts.md#containercputhrottlinghigh"
 
   # ---------- 차량 API (orbit-server) ----------
   - name: orbit-server
@@ -114,7 +117,7 @@ groups:
           severity: warning
         annotations:
           summary: "차량 API 5xx 비율 {{ $value | humanizePercentage }} (10분 이상 1% 초과)"
-          runbook_url: "https://github.com/ORBIT-CLOUD-LABS/orbit/issues/47"
+          runbook_url: "https://github.com/ORBIT-CLOUD-LABS/orbit/blob/main/docs/runbook-alerts.md#vehicleapierrorratehigh"
 
       - alert: VehicleApiLatencyP95High
         # 임계값 1s 는 1차 제안값이다. orbit#23 실험 결과로 확정한다.
@@ -127,7 +130,7 @@ groups:
           severity: warning
         annotations:
           summary: "차량 API P95 {{ $value | printf \"%.3f\" }}s (10분 이상 1s 초과)"
-          runbook_url: "https://github.com/ORBIT-CLOUD-LABS/orbit/issues/47"
+          runbook_url: "https://github.com/ORBIT-CLOUD-LABS/orbit/blob/main/docs/runbook-alerts.md#vehicleapilatencyp95high"
 
       - alert: HikariConnectionsPending
         # DB 가 먼저 막혔는지 보는 지표. pending 이 지속되면 커넥션 풀이 병목이다.
@@ -138,7 +141,7 @@ groups:
         annotations:
           summary: "Hikari 커넥션 대기 {{ $value }}건 지속 ({{ $labels.pool }})"
           description: "DB VM CPU 의 iowait 비중을 함께 본다. 'CPU 높음' 이 실제로는 디스크 쓰기 대기일 수 있다 (orbit#23 T_db)."
-          runbook_url: "https://github.com/ORBIT-CLOUD-LABS/orbit/issues/47"
+          runbook_url: "https://github.com/ORBIT-CLOUD-LABS/orbit/blob/main/docs/runbook-alerts.md#hikariconnectionspending"
 
   # ---------- VM·호스트 ----------
   - name: nodes
@@ -156,4 +159,4 @@ groups:
           severity: warning
         annotations:
           summary: "디스크 여유 {{ $value | printf \"%.1f\" }}%: {{ $labels.instance }} {{ $labels.mountpoint }}"
-          runbook_url: "https://github.com/ORBIT-CLOUD-LABS/orbit/issues/47"
+          runbook_url: "https://github.com/ORBIT-CLOUD-LABS/orbit/blob/main/docs/runbook-alerts.md#nodediskspacelow"
