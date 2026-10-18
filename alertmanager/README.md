@@ -30,8 +30,18 @@ sudo cp ../prometheus/prometheus.yml /etc/prometheus/prometheus.yml
 sudo systemctl reload prometheus
 ```
 
-패키지가 설치하는 설정 경로는 배포판에 따라 `/etc/prometheus/alertmanager.yml`일 수 있다.
-`systemctl cat prometheus-alertmanager | grep config.file`로 실제 경로를 먼저 확인한다.
+**설정 경로를 먼저 확인한다.** Ubuntu 패키지(0.26.0)는 `--config.file`이
+`/etc/prometheus/alertmanager.yml`이다 — `/etc/alertmanager/alertmanager.yml`에 복사하면
+조용히 무시되고 패키지 기본 설정(`team-X-mails` → `localhost:25` 메일)이 그대로 돌아간다.
+
+```bash
+systemctl cat prometheus-alertmanager | grep -E 'ExecStart|EnvironmentFile'
+cat /etc/default/prometheus-alertmanager      # ARGS 에 --config.file 이 있다
+```
+
+기본 설정을 한 번 백업해두고(`alertmanager.yml.bak`) 그 경로로 복사한다.
+webhook URL 파일(`/etc/alertmanager/slack-webhook-url`)의 위치는 설정 안에 적힌 절대경로라
+설정 파일이 어디에 있든 그대로 둔다.
 
 ## 적용 확인
 
@@ -44,6 +54,9 @@ curl -s http://localhost:9090/api/v1/rules | jq -r '.data.groups[].name'
 
 # Alertmanager가 받은 알림 (Watchdog는 항상 떠 있어야 한다)
 curl -s http://localhost:9093/api/v2/alerts | jq -r '.[].labels.alertname'
+
+# 로드된 설정이 이 저장소의 것인지 (경로를 잘못 짚으면 여기서 드러난다)
+curl -s http://localhost:9093/api/v2/status | jq -r '.config.original'   | grep -E 'orbit-default|slack-webhook-url|5-alerts'
 ```
 
 `Watchdog`이 보이지 않으면 Prometheus→Alertmanager 경로가 끊긴 것이다. 규칙 평가 자체는
