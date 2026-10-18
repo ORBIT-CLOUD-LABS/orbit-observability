@@ -15,6 +15,7 @@ Phase1 작업은 orbit `docs/phase1.md` 를 먼저 읽는다.
 | --- | --- |
 | 수집 구조·공통 값 확인 (항상) | [docs/requirements.md](docs/requirements.md) |
 | 수집 대상·대시보드 패널 추가·변경 | [docs/monitoring-targets.md](docs/monitoring-targets.md) |
+| 알림 규칙·통지 설정 추가·변경 | [docs/monitoring-targets.md](docs/monitoring-targets.md) §알림 규칙, [alertmanager/README.md](alertmanager/README.md) |
 | k6 시나리오·fixture 작성 | [docs/requirements.md](docs/requirements.md) §k6 부하 실험, orbit `docs/api.md` |
 | Issue·Branch·커밋·PR·리뷰 | Org 공통 [CONTRIBUTING.md](https://github.com/ORBIT-CLOUD-LABS/.github/blob/main/CONTRIBUTING.md) |
 
@@ -22,7 +23,7 @@ Phase1 작업은 orbit `docs/phase1.md` 를 먼저 읽는다.
 
 | 이 레포 | 다른 레포 |
 | --- | --- |
-| 모니터링 VM 의 Prometheus·Loki·Grafana 설정, 수집 대상, 보존 기간, 대시보드 | 클러스터 안 수집기(Alloy, kube-state-metrics) 배포 선언: orbit-gitops |
+| 모니터링 VM 의 Prometheus·Loki·Grafana·Alertmanager 설정, 수집 대상, 보존 기간, 대시보드, 알림 규칙 | 클러스터 안 수집기(Alloy, kube-state-metrics) 배포 선언: orbit-gitops |
 | k6 부하 실험 시나리오·fixture·실행 스크립트 (`k6/`) | VM·호스트의 node_exporter 설치: orbit-infrastructure |
 | | 서버 메트릭 노출(`/actuator/prometheus`): orbit-server |
 | | 실험 결과 문서(run ID 별 조건·원시 결과·판정): orbit |
@@ -35,6 +36,7 @@ Phase1 작업은 orbit `docs/phase1.md` 를 먼저 읽는다.
 VM·호스트 node_exporter (:9100) ◀──scrape── Prometheus
 k6 (ASTRA 호스트·ASTRA 밖 장비) ──remote write──▶ Prometheus
 Grafana (:3000) ──조회──▶ Prometheus, Loki
+Prometheus ──규칙 평가──▶ Alertmanager (localhost:9093)
 ```
 
 ## 핵심 규칙 요약
@@ -53,5 +55,7 @@ PR 에는 실제로 실행한 검증만 적는다.
 
 ```bash
 promtool check config <prometheus.yml>   # Prometheus 설정
+promtool check rules <rules.yml>          # 알림 규칙
+amtool check-config <alertmanager.yml>    # Alertmanager 설정
 loki -verify-config -config.file=<config> # Loki 설정
 ```

@@ -18,6 +18,8 @@ Phase1 서버 HPA·복구 실험(ORBIT-CLOUD-LABS/orbit#23)과 CDN 실험(ORBIT-
                                                                  ▼          ▼
 [VM·ASTRA 호스트]                                   모니터링 VM 192.168.100.107
   node_exporter :9100 ◀── scrape (5s) ──────────── Prometheus :9090 ── Grafana :3000
+                                                        │
+                                                        └─ 규칙 평가 ──▶ Alertmanager :9093
 ```
 
 | 경로 | 대상 | 설정 위치 | 간격 |
@@ -26,6 +28,7 @@ Phase1 서버 HPA·복구 실험(ORBIT-CLOUD-LABS/orbit#23)과 CDN 실험(ORBIT-
 | Alloy → remote write | orbit-server(`:8080/actuator/prometheus`), cAdvisor, kube-state-metrics | orbit-gitops `platform/alloy/config.alloy` | 30s |
 | Alloy → Loki | `orbit` namespace Pod stdout (Nginx JSON access log 포함) | 같은 파일 | - |
 | k6 → remote write | `k6_*` 지표 | `k6/scripts/run.sh` | k6 기본 |
+| Prometheus → Alertmanager | 알림 규칙 발화 (같은 VM 루프백 `localhost:9093`) | `prometheus/rules/alerts.yml`, `alertmanager/alertmanager.yml` | 30s (규칙 평가) |
 
 remote write 9090 은 k8s 노드 4대와 `192.168.100.1` 에서만 받는다. ASTRA 밖 장비도 Tailscale subnet router 를 지나며 `192.168.100.1` 로 보인다 (`prometheus/README.md`).
 
@@ -56,6 +59,38 @@ remote write 9090 은 k8s 노드 4대와 `192.168.100.1` 에서만 받는다. AS
 | --- | --- | --- | --- |
 | 언제 내려가고 돌아왔나 | `kube_pod_start_time`, `kube_pod_status_ready`, available replica | kube-state-metrics | Pod 나이, Replica |
 | 요청이 몇 개 실패했나 | `k6_http_reqs_total{expected_response="false"}`, 서버 5xx | k6, orbit-server | k6 실패 요청률, 차량 API 오류율 |
+
+## 알림 규칙
+
+규칙은 `prometheus/rules/alerts.yml`, 통지 설정은 `alertmanager/alertmanager.yml` 이다 (#29).
+위 "실험 질문별 대상" 의 지표 중 **사람이 보고 있지 않아도 알아야 하는 것** 만 골랐다.
+적용 절차는 `alertmanager/README.md`.
+
+| 그룹 | 알림 | 조건 | 왜 |
+| --- | --- | --- | --- |
+| targets | `Watchdog` | 항상 발화 | 이 알림이 사라지면 알림 경로 자체가 죽은 것이다. 사람에게 보내지 않는다 |
+| targets | `TargetDown` | `up == 0`, 10m | node_exporter·kubelet·kube-state-metrics·Alertmanager 를 한 규칙으로 덮는다. Alloy 가 붙이는 job·instance 값에 의존하지 않게 job 별로 쪼개지 않았다 |
+| targets | `RemoteWriteRejected` | write 4xx·5xx > 0, 10m | label 붕괴 → `duplicate sample` 400 → Prometheus 2.45 가 배치 통째 Rollback. 패널이 비는 모습으로만 드러나 발견이 늦었다 (orbit-gitops#35, #38) |
+| kubernetes | `PodNotReady` | Ready=false, 10m | 복구 실험에서 보던 상태를 상시 감시로 돌린 것 |
+| kubernetes | `DeploymentReplicasUnavailable` | available < spec, 15m | HPA scale-out 중 일시적 부족은 정상이라 `for` 를 길게 둔다 |
+| kubernetes | `ContainerRestartingRepeatedly` | 15분간 재시작 > 2 | CrashLoop 를 재시작 횟수로 잡는다 |
+| kubernetes | `ContainerCpuThrottlingHigh` | throttled 비율 > 25%, 15m | request 500m / limit 750m 확정값(orbit#23) 기준으로 limit 부족 신호 |
+| orbit-server | `VehicleApiErrorRateHigh` | 차량 API 5xx > 1%, 10m | 판정 패널과 같은 `uri` 필터를 쓴다 (health probe 제외) |
+| orbit-server | `VehicleApiLatencyP95High` | P95 > 1s, 10m | 임계값은 1차 제안값 |
+| orbit-server | `HikariConnectionsPending` | pending > 0, 10m | DB 가 먼저 막혔는지 보는 지표. iowait 와 함께 읽는다 (orbit#23 `T_db`) |
+| nodes | `NodeDiskSpaceLow` | 여유 < 15%, 30m | 보존 15일 설정과 모니터링 VM data disk(20GiB)를 함께 본다 |
+
+규칙을 쓸 때 걸리는 제약:
+
+- **Alloy 를 지나는 지표만 쓸 수 있다.** cAdvisor 는 `container_cpu_usage_seconds_total`·
+  `container_cpu_cfs_periods_total`·`container_cpu_cfs_throttled_periods_total`·
+  `container_memory_working_set_bytes` 만 통과하고, label 도 허용목록만 남는다. 허용목록에 없는
+  지표·label 로 규칙을 쓰면 시계열이 없거나 붕괴한 값을 본다. node_exporter 지표는 Prometheus 가
+  직접 scrape 하므로 이 제약이 없다.
+- **임계값과 `for` 는 1차 제안값이다.** 부하 실험 중에는 CPU throttling·P95 상승이 의도된
+  상태라 `for` 를 길게 뒀다. 실험 결과(orbit#23)로 확정하기 전까지 확정값처럼 다루지 않는다.
+- **대응 절차는 orbit 레포에 둔다.** 알림의 `runbook_url` 은 orbit#47 Runbook 이 문서로 나오면
+  그 경로로 교체한다 (Org CONTRIBUTING: Runbook 은 orbit).
 
 ## 지표를 추가하거나 바꿀 때
 
