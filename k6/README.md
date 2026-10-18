@@ -1,6 +1,6 @@
 # k6 부하 실험
 
-Phase1 서버 HPA·복구 실험(ORBIT-CLOUD-LABS/orbit#23)과 OTA 전체 흐름 확인에 쓰는 k6 스크립트다. 실험 기준은 [docs/requirements.md](../docs/requirements.md) §k6 부하 실험을 따른다.
+Phase1 서버 HPA·복구 실험(ORBIT-CLOUD-LABS/orbit#23), CDN 캐시·Edge 실험(ORBIT-CLOUD-LABS/orbit#24)과 OTA 전체 흐름 확인에 쓰는 k6 스크립트다. 실험 기준은 [docs/requirements.md](../docs/requirements.md) §k6 부하 실험을 따른다.
 
 ## 구성
 
@@ -8,6 +8,7 @@ Phase1 서버 HPA·복구 실험(ORBIT-CLOUD-LABS/orbit#23)과 OTA 전체 흐름
 | --- | --- |
 | `scenarios/smoke-e2e.js` | OTA 전체 흐름 1회 확인 (등록 → 체크인 → 매니페스트 → Edge 다운로드 → 결과 보고) |
 | `scenarios/server-hpa.js` | 서버 부하. 체크인 → (업데이트 대상이면) 매니페스트, `ramping-arrival-rate` |
+| `scenarios/cdn-download.js` | CDN 부하. 매니페스트로 받은 Edge 주소에서 같은 시험 파일을 반복 다운로드, `ramping-arrival-rate` |
 | `lib/config.js` | 실행 설정 (`-e` 또는 환경 변수) |
 | `lib/fixture.js` | 시험 데이터 준비. 차종은 `K6-` 로 시작하고 이미 있으면 재사용 |
 | `lib/vehicle-api.js`, `lib/cdn.js` | 체크인·매니페스트 호출, Edge 다운로드 |
@@ -47,6 +48,9 @@ k6/scripts/run.sh smoke-e2e
 
 # 서버 부하 (값은 orbit#23 사전 측정 결과로 정한다)
 k6/scripts/run.sh server-hpa -e STAGES=10:1m,50:3m,100:5m,10:2m -e VEHICLES=100 -e UPDATE_RATIO=0.1
+
+# CDN 다운로드 (20MB 파일, 초당 10건 2분)
+k6/scripts/run.sh cdn-download -e FIRMWARE_SIZE_MB=20 -e STAGES=10:10s,10:2m
 ```
 
 `run.sh` 뒤의 인자는 그대로 `k6 run` 에 넘어간다.
@@ -66,8 +70,10 @@ JUMP_HOST= taskset -c 10,11 k6/scripts/run.sh server-hpa -e STAGES=... -e VEHICL
 | `SERVER_URL` | `http://192.168.100.102:30080` | 공통 | 서버 NodePort |
 | `CDN_URL` | 없음 | smoke | 매니페스트 `downloadUrl` 의 주소 부분을 바꿀 때 (터널 등) |
 | `RUN_ID` | `<UTC 시각>-<시나리오>` | 공통 | 실행 구분값. 결과 디렉터리 이름, Prometheus `run_id` label |
-| `FIRMWARE_SIZE_MB` | `1` | smoke | 시험 파일 크기 |
-| `STAGES` | `10:1m,50:2m,100:3m,100:3m,10:2m` | server-hpa | `목표 요청률(iteration/s):시간` 목록. 앞 단계 값에서 목표까지 그 시간 동안 직선으로 올린다 (아래 단계 유지) |
+| `FIRMWARE_SIZE_MB` | `1` (smoke), `10` (cdn-download) | smoke, cdn-download | 시험 파일 크기. cdn-download 는 크기마다 차종 `K6-CDN-<N>MB` 를 따로 두고 재사용한다 |
+| `STAGES` | `10:1m,50:2m,100:3m,100:3m,10:2m` (server-hpa), `5:1m,20:3m` (cdn-download) | server-hpa, cdn-download | `목표 요청률(iteration/s):시간` 목록. 앞 단계 값에서 목표까지 그 시간 동안 직선으로 올린다 (아래 단계 유지). 시간은 단위 하나만 쓴다 (`390s` 는 되고 `6m30s` 는 안 된다) |
+| `HASH_RATIO` | `0.05` | cdn-download | SHA-256 까지 검증할 요청 비율(0~1). 크기는 매번 검증한다. 해시 계산이 k6 CPU 를 많이 써서 처리량 한계를 잴 때는 `0` 으로 둔다 |
+| `MAX_VUS` | `100` | cdn-download | 최대 VU. 다운로드가 느려져 VU 가 모자라면 dropped iterations 가 생긴다 |
 | `VEHICLES` | `100` | server-hpa | 차량 수 = 최대 VU. VU 하나가 차량 하나를 맡는다 |
 | `UPDATE_RATIO` | `0.1` | server-hpa | 업데이트 대상 비율. 대상이면 매니페스트까지 호출 |
 | `JUMP_HOST` | `orbit-astra` | run.sh, cleanup.sh | 클러스터 VM 에 접속할 때 거치는 호스트. ASTRA 호스트에서 실행하면 빈 값(`JUMP_HOST=`) |
@@ -89,6 +95,14 @@ JUMP_HOST= taskset -c 10,11 k6/scripts/run.sh server-hpa -e STAGES=... -e VEHICL
 - 처음 `5:30s,5:1m` 은 JIT warm-up 이라 판정에서 뺀다
 - 서버·cAdvisor 지표는 30초마다 수집되므로 단계 판정은 2분 창(`[2m]`)으로 본다. 1분 창은 샘플이 2개뿐이라 값이 튄다
 
+### CDN 실험 (cold·warm)
+
+- **cold**: Edge 캐시가 빈 상태. `kubectl -n orbit rollout restart deployment/cdn-edge` 로 Edge 를 다시 띄우고 Ready 를 확인한 직후 실행한다. Edge 마다 첫 요청 1건만 `MISS`(Origin 으로 감)이고 이후 `HIT` 여야 한다
+- **warm**: cold 실행 직후 같은 파일로 다시 실행한다. 모든 요청이 `HIT` 이고 Origin 요청이 0 이어야 한다
+- **캐시 조건** (orbit-gitops `workloads/cdn` 의 `proxy_cache`): `max_size=1g`, `inactive=30m`. 시험 파일은 1GB 보다 충분히 작게 두고(20MB 이하), warm 실행은 cold 뒤 30분 안에 끝낸다. 30분 넘게 요청이 없으면 캐시에서 빠져 다시 `MISS` 가 된다
+- **k6 코어**: 20MB 파일로 초당 수십 건을 받으면 k6 도 CPU 를 많이 쓴다. ASTRA 호스트에서는 4코어(`taskset -c 8-11`)로 묶고 `HASH_RATIO=0` 으로 실행한다
+- **연결 재사용**: k6 는 연결을 재사용하고 NodePort 분산은 연결 단위라 요청이 한 Edge 로 몰릴 수 있다. Edge 수를 비교할 때는 run 마다 k6 를 새로 시작하고, Edge 별 분산을 `edge` label 로 확인한다
+
 ## 결과
 
 - **로컬**: `k6/runs/<RUN_ID>/` 에 `conditions.txt`(실행 조건·종료 코드), `k6.log`, `summary.json`. git 에 올리지 않는다.
@@ -96,8 +110,9 @@ JUMP_HOST= taskset -c 10,11 k6/scripts/run.sh server-hpa -e STAGES=... -e VEHICL
   - fixture 요청은 `phase="fixture"` 로 구분되므로 측정에서는 `name` 이 `check-in`·`manifest` 인 것만 본다.
   - `k6_dropped_iterations_total` 은 한 번도 발생하지 않으면 시계열 자체가 없다. 조회할 때 `or vector(0)` 으로 0 을 채운다.
   - 2026-10-17 ASTRA 호스트에서 확인: `server-hpa`(`STAGES=1:20s`, `VEHICLES=2`) 1회로 시계열 274개가 `run_id`·`experiment="server-hpa"`·`name` label 과 함께 들어옴, `url` label 없음.
+  - `cdn-download` 는 `experiment="cdn-download"` 이고, 다운로드 요청은 `name="download"` 다. Edge 응답 헤더(`X-Cache-Status`, `X-Edge-ID`)별 요청 수·받은 byte 를 `k6_cdn_requests_total`·`k6_cdn_bytes_total` 에 `cache`·`edge` label 로 남긴다. Loki 없이도 HIT/MISS 비율과 Edge 별 분산을 볼 수 있다 (2026-10-17 orbit#24 측정에서 확인).
 - **결과 문서**: run ID 별 조건·원시 결과·판정은 orbit 레포에 정리한다.
-- `server-hpa` 의 thresholds 는 판정 기준이 아니다. 요약에 `name` 별 값을 따로 보여 주기 위한 기준선이다.
+- `server-hpa`·`cdn-download` 의 thresholds 는 판정 기준이 아니다. 요약에 `name` 별 값을 따로 보여 주기 위한 기준선이다.
 
 ## 정리
 
@@ -106,5 +121,6 @@ JUMP_HOST= taskset -c 10,11 k6/scripts/run.sh server-hpa -e STAGES=... -e VEHICL
 ```bash
 k6/scripts/cleanup.sh K6-SMOKE-<RUN_ID>   # smoke 1회분 (smoke 출력 마지막 줄에 나온다)
 k6/scripts/cleanup.sh K6-SMOKE-           # smoke 전체
+k6/scripts/cleanup.sh K6-CDN-             # CDN 시험 파일 (K6-CDN-<N>MB). 지우면 다음 실행에서 다시 올린다
 k6/scripts/cleanup.sh K6-                 # 부하 fixture(K6-LOAD) 포함 전체. 실험 기간에는 지우지 않는다
 ```
