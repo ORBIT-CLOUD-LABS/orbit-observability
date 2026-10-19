@@ -62,8 +62,8 @@ receivers:
         # payload 의 channel 은 무시되므로, 적어 두면 틀린 정보만 남는다.
         # 받는 채널은 README "수신처" 절에 적는다.
 
-        # color 는 슬랙 스키마의 attachments 필드다. 디스코드가 색 띠로 반영하지 않으면
-        # 지워도 통지 내용에는 영향이 없다.
+        # color 는 슬랙 스키마의 attachments 필드다. danger/good 을 디스코드도 받는 것을
+        # 실제 웹후크로 확인했다 — hex 로 바꿀 필요 없다 (README "전송 확인" 참고).
         color: '{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}'
         title: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}'
         text: >-
