@@ -218,6 +218,20 @@ amtool alert --alertmanager.url=http://localhost:9093
 
 ## 임계값
 
-`prometheus/rules/alerts.yml`의 임계값과 `for`는 1차 제안값이다. 실험 결과
-(ORBIT-CLOUD-LABS/orbit#23)로 확정하기 전까지 확정값처럼 다루지 않는다.
-알림별 대응 절차는 ORBIT-CLOUD-LABS/orbit#47에서 Runbook으로 작성한다.
+`prometheus/rules/alerts.yml`의 임계값과 `for`는 2026-10-19에 확정했다(#39).
+각 값의 근거는 규칙별 주석에 적혀 있고, 두 종류로 구분한다.
+
+- **실측**: 부하 실험 관측값에서 가져온 값. 근거는 orbit `experiments/server-hpa.md`와
+  `docs/runbook-alerts.md`의 실측 표다. 단독 부하 조건(server-hpa.md 2절: k6 1개,
+  `taskset -c 10,11`)으로 재측정하면 다시 본다.
+- **판단**: 통지 지연과 오탐 비용을 절충한 운영 판단값. 실측 근거는 없다.
+
+판정 기준과 어긋나지 않게 맞춘 값이 둘 있다. `VehicleApiLatencyP95High`는 server-hpa.md
+1절의 판정 기준과 같은 500ms, `VehicleApiErrorRateHigh`는 같은 1%다.
+
+`HikariConnectionsPending`은 warning(`> 10`, 10분)과 critical(`> 100`, 5분) 두 단계이고
+**alertname이 같다**. Runbook의 절 제목이 알림 이름과 1:1이라 이름을 나누면 `runbook_url`
+anchor가 깨지기 때문이다. 두 단계가 같은 Pod에서 동시에 발화하므로 `alertmanager.yml`의
+`inhibit_rules`에서 critical이 같은 `pod`의 warning을 누른다.
+
+알림별 대응 절차는 orbit 레포 `docs/runbook-alerts.md`에 있다.
