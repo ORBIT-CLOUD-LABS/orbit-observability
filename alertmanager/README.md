@@ -74,8 +74,12 @@ amtool check-config /etc/alertmanager/alertmanager.yml
 
 ## 수신처 (디스코드)
 
-디스코드 채널로 통지한다 (orbit-observability#33 결정. 이전의 슬랙 `#5-alerts` 결정(#29)을 대체한다).
-받는 채널은 웹후크를 만들 때 고른 채널로 고정된다.
+디스코드 **`#orbit-알림`** 으로 통지한다 (orbit-observability#33 결정. 이전의 슬랙 `#5-alerts`
+결정(#29)을 대체한다).
+
+채널명을 아는 자리는 이 문서뿐이다. `alertmanager.yml` 의 `channel` 키는 디스코드가 무시해서
+#33 에서 제거했고(적어 두면 틀린 정보만 남는다), 웹후크 URL 은 비밀값이라 커밋하지 않는다.
+받는 채널은 웹후크를 만들 때 고정되므로 바꿀 때는 **웹후크를 다시 만든다** (아래 "전송 확인" 참고).
 
 **설정 블록이 `slack_configs` 인 것은 오타가 아니다.** 디스코드 웹후크 URL 끝에 `/slack` 을 붙인
 **슬랙 호환 엔드포인트**를 쓴다. 디스코드가 슬랙 payload 를 그대로 해석하므로
