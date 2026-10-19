@@ -40,7 +40,7 @@ cat /etc/default/prometheus-alertmanager      # ARGS 에 --config.file 이 있�
 ```
 
 기본 설정을 한 번 백업해두고(`alertmanager.yml.bak`) 그 경로로 복사한다.
-webhook URL 파일(`/etc/alertmanager/slack-webhook-url`)의 위치는 설정 안에 적힌 절대경로라
+webhook URL 파일(`/etc/alertmanager/discord-webhook-url`)의 위치는 설정 안에 적힌 절대경로라
 설정 파일이 어디에 있든 그대로 둔다.
 
 ## 적용 확인
@@ -56,7 +56,7 @@ curl -s http://localhost:9090/api/v1/rules | jq -r '.data.groups[].name'
 curl -s http://localhost:9093/api/v2/alerts | jq -r '.[].labels.alertname'
 
 # 로드된 설정이 이 저장소의 것인지 (경로를 잘못 짚으면 여기서 드러난다)
-curl -s http://localhost:9093/api/v2/status | jq -r '.config.original'   | grep -E 'orbit-default|slack-webhook-url|5-alerts'
+curl -s http://localhost:9093/api/v2/status | jq -r '.config.original'   | grep -E 'orbit-default|discord-webhook-url'
 ```
 
 `Watchdog`이 보이지 않으면 Prometheus→Alertmanager 경로가 끊긴 것이다. 규칙 평가 자체는
@@ -72,10 +72,26 @@ amtool check-config /etc/alertmanager/alertmanager.yml
 
 `promtool`은 `prometheus` 패키지에, `amtool`은 `prometheus-alertmanager` 패키지에 들어 있다.
 
-## 수신처 (슬랙 #5-alerts)
+## 수신처 (디스코드)
 
-슬랙 `#5-alerts` 채널로 통지한다. 모니터링 VM 에서 외부 egress 가 열려 있는 것을 확인했다
-(`https://slack.com` → 200).
+디스코드 채널로 통지한다 (orbit-observability#33 결정. 이전의 슬랙 `#5-alerts` 결정(#29)을 대체한다).
+받는 채널은 웹후크를 만들 때 고른 채널로 고정된다.
+
+**설정 블록이 `slack_configs` 인 것은 오타가 아니다.** 디스코드 웹후크 URL 끝에 `/slack` 을 붙인
+**슬랙 호환 엔드포인트**를 쓴다. 디스코드가 슬랙 payload 를 그대로 해석하므로
+`slack_configs` + `api_url_file`(0.25+) 과 기존 `color`·`title`·`text` 템플릿을 그대로 쓸 수 있다.
+
+네이티브 `discord_configs` 는 쓰지 않는다. 설치본 **0.26.0** 의 `discord_configs` 에는
+`webhook_url` 만 있고 **`webhook_url_file` 이 없다** (`config/notifiers.go` 기준 **0.27.0 에서 추가**).
+파일 참조가 안 되면 웹후크 URL 을 `alertmanager.yml` 에 인라인으로 적어야 해서 아래
+"비밀값은 커밋하지 않는다" 와 충돌한다. 0.27+ 는 apt 에 없어 tarball + systemd unit 직접 작성이
+되고, 그건 Prometheus·Loki·Grafana 와 같은 apt + systemd 설치 방식에서 벗어난다.
+
+모니터링 VM 에서 디스코드로 나가는 egress 가 열려 있어야 한다.
+
+```bash
+curl -sS -o /dev/null -w '%{http_code}' https://discord.com/api/v10/gateway; echo
+```
 
 **비밀값(webhook URL)은 커밋하지 않는다.** VM 파일에만 두고 `api_url_file`(0.25+) 로 참조한다.
 
@@ -85,15 +101,20 @@ amtool check-config /etc/alertmanager/alertmanager.yml
 으로는 안 잡히고 `journalctl` 에만 나온다.
 
 ```bash
-# https://api.slack.com/apps → 해당 앱 → Incoming Webhooks → #5-alerts 용 URL 복사
+# 디스코드: 서버 설정 → 연동 → 웹후크 → 새 웹후크 → 채널 선택 → 웹후크 URL 복사
+# 복사한 URL 끝에 /slack 을 붙인 값을 저장한다
+#   https://discord.com/api/webhooks/<id>/<token>/slack
 AMUSER=$(systemctl show -p User --value prometheus-alertmanager); echo "${AMUSER:-root}"
 
-sudo touch /etc/alertmanager/slack-webhook-url
-sudo tee /etc/alertmanager/slack-webhook-url >/dev/null   # URL 붙여넣고 Enter, Ctrl-D
-sudo chown "${AMUSER:-root}":"${AMUSER:-root}" /etc/alertmanager/slack-webhook-url
-sudo chmod 0400 /etc/alertmanager/slack-webhook-url
+sudo touch /etc/alertmanager/discord-webhook-url
+sudo tee /etc/alertmanager/discord-webhook-url >/dev/null   # URL 붙여넣고 Enter, Ctrl-D
+sudo chown "${AMUSER:-root}":"${AMUSER:-root}" /etc/alertmanager/discord-webhook-url
+sudo chmod 0400 /etc/alertmanager/discord-webhook-url
 sudo chmod 0755 /etc/alertmanager                         # 서비스 계정이 디렉터리에 들어갈 수 있어야 한다
 sudo systemctl restart prometheus-alertmanager
+
+# 슬랙에서 넘어온 뒤에는 옛 파일을 남기지 않는다
+sudo rm -f /etc/alertmanager/slack-webhook-url
 ```
 
 셸 히스토리에 URL 이 남지 않도록 `tee` 표준입력으로 붙여넣는다. 파일 끝의 개행은 Alertmanager
@@ -102,17 +123,19 @@ sudo systemctl restart prometheus-alertmanager
 전송 확인:
 
 ```bash
-# webhook URL 자체가 살아있는지 (#5-alerts 에 "ping" 이 올라온다)
-curl -sS -o /dev/null -w '%{http_code}
-' -H 'Content-Type: application/json'   -d '{"text":"orbit alertmanager ping"}' "$(sudo cat /etc/alertmanager/slack-webhook-url)"
+# webhook URL 자체가 살아있는지 (디스코드 채널에 "ping" 이 올라온다. 성공은 2xx, 보통 204)
+curl -sS -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -d '{"text":"orbit alertmanager ping"}' "$(sudo cat /etc/alertmanager/discord-webhook-url)"; echo
 
 # Alertmanager 가 실제로 보냈는지 (실패하면 여기 로그에 남는다)
 journalctl -u prometheus-alertmanager -n 50 --no-pager | grep -i notify
 ```
 
-`open ...: permission denied` 는 위의 소유자 문제다. `invalid_token` 이나 404 가 오면 URL 이 폐기된 것이고, `channel_not_found` 는 앱이 그 채널에
-초대되지 않은 것이다. Incoming Webhook 은 설치할 때 고른 채널로 고정되므로
-`alertmanager.yml` 의 `channel` 값을 바꿔도 전송 대상은 바뀌지 않는다 — 기록용 값이다.
+`open ...: permission denied` 는 위의 소유자 문제다. 401·404 는 웹후크가 지워졌거나 URL 이
+틀린 것이다. **URL 끝의 `/slack` 을 빼먹으면** 디스코드가 슬랙 payload 를 해석하지 못해
+`400` 과 함께 통지가 실패한다 — 설정 검증으로는 안 잡히므로 위 `curl` 로 가른다.
+
+채널을 바꿀 때는 `alertmanager.yml` 이 아니라 **웹후크를 다시 만들어** 파일 내용을 교체한다.
+디스코드 웹후크도 만들 때 고른 채널로 고정되고 payload 의 channel 은 무시한다.
 
 ## 접근 범위 (ufw)
 
