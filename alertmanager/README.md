@@ -123,16 +123,31 @@ sudo rm -f /etc/alertmanager/slack-webhook-url
 전송 확인:
 
 ```bash
-# webhook URL 자체가 살아있는지 (디스코드 채널에 "ping" 이 올라온다. 성공은 2xx, 보통 204)
-curl -sS -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -d '{"text":"orbit alertmanager ping"}' "$(sudo cat /etc/alertmanager/discord-webhook-url)"; echo
+# webhook URL 이 살아있는지 + 어느 엔드포인트인지 (디스코드 채널에 "ping" 이 올라온다)
+curl -sS -o /tmp/am-ping.out -w '%{http_code}' -H 'Content-Type: application/json' -d '{"text":"orbit alertmanager ping"}' "$(sudo cat /etc/alertmanager/discord-webhook-url)"; echo " $(cat /tmp/am-ping.out)"; rm -f /tmp/am-ping.out
 
 # Alertmanager 가 실제로 보냈는지 (실패하면 여기 로그에 남는다)
 journalctl -u prometheus-alertmanager -n 50 --no-pager | grep -i notify
 ```
 
+**응답으로 엔드포인트 종류를 가린다.** 위 `curl` 이
+
+- `200 ok` → 슬랙 호환 엔드포인트다 (URL 끝에 `/slack` 있음). 이게 맞는 상태다
+- `204` + 빈 본문 → **일반 디스코드 웹후크다. `/slack` 이 빠졌다**
+- `400 {"attachments": ["0"]}` → 같은 원인(`/slack` 누락)인데 Alertmanager 가 보낸 payload 로
+  맞은 것이다. 일반 웹후크에도 `attachments` 파라미터가 있지만 그건 **파일 업로드용** 객체
+  배열이라, 슬랙식 attachments 를 보내면 0번 항목 검증에서 깨진다
+
+`/slack` 누락은 `amtool check-config` 로 안 잡히고 `journalctl` 에
+`notify retry canceled due to unrecoverable error` 로만 나온다 (2026-10-18 21:53 실제 사례).
+`unrecoverable` 이라 재시도도 안 하므로 알림이 조용히 사라진다.
+
 `open ...: permission denied` 는 위의 소유자 문제다. 401·404 는 웹후크가 지워졌거나 URL 이
-틀린 것이다. **URL 끝의 `/slack` 을 빼먹으면** 디스코드가 슬랙 payload 를 해석하지 못해
-`400` 과 함께 통지가 실패한다 — 설정 검증으로는 안 잡히므로 위 `curl` 로 가른다.
+틀린 것이다.
+
+`color` 의 `danger`/`good` 은 디스코드도 받아들인다(hex 로 바꿀 필요 없음). `channel`·`username`·
+`fallback`·`mrkdwn_in`, 빈 `text` 가 섞인 Alertmanager 실제 payload 도 그대로 통과하는 것을
+확인했다 — 즉 통지 실패를 만나면 payload 를 의심하기 전에 **엔드포인트와 파일 소유자**를 본다.
 
 채널을 바꿀 때는 `alertmanager.yml` 이 아니라 **웹후크를 다시 만들어** 파일 내용을 교체한다.
 디스코드 웹후크도 만들 때 고른 채널로 고정되고 payload 의 channel 은 무시한다.
