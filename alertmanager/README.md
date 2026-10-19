@@ -130,24 +130,41 @@ curl -sS -o /tmp/am-ping.out -w '%{http_code}' -H 'Content-Type: application/jso
 journalctl -u prometheus-alertmanager -n 50 --no-pager | grep -i notify
 ```
 
-**응답으로 엔드포인트 종류를 가린다.** 위 `curl` 이
+**응답으로 엔드포인트 종류를 가린다.** 위 `curl` 이 `200 ok` 면 슬랙 호환 엔드포인트다
+(URL 끝에 `/slack` 있음, 이게 맞는 상태). `204` + 빈 본문이면 일반 디스코드 웹후크라
+`/slack` 이 빠진 것이다. `open ...: permission denied` 는 위의 소유자 문제, 401·404 는
+웹후크가 지워졌거나 URL 이 틀린 것이다.
 
-- `200 ok` → 슬랙 호환 엔드포인트다 (URL 끝에 `/slack` 있음). 이게 맞는 상태다
-- `204` + 빈 본문 → **일반 디스코드 웹후크다. `/slack` 이 빠졌다**
-- `400 {"attachments": ["0"]}` → 같은 원인(`/slack` 누락)인데 Alertmanager 가 보낸 payload 로
-  맞은 것이다. 일반 웹후크에도 `attachments` 파라미터가 있지만 그건 **파일 업로드용** 객체
-  배열이라, 슬랙식 attachments 를 보내면 0번 항목 검증에서 깨진다
+### `400 {"attachments": ["0"]}` — attachment 안의 URL 이 거부된 것이다
 
-`/slack` 누락은 `amtool check-config` 로 안 잡히고 `journalctl` 에
-`notify retry canceled due to unrecoverable error` 로만 나온다 (2026-10-18 21:53 실제 사례).
-`unrecoverable` 이라 재시도도 안 하므로 알림이 조용히 사라진다.
+**두 번 밟은 함정이다** (2026-10-18 21:53, 2026-10-19 재현). 디스코드는 attachment 의 URL 필드를
+검증하고 **호스트명에 TLD 가 없으면 거부한다.**
 
-`open ...: permission denied` 는 위의 소유자 문제다. 401·404 는 웹후크가 지워졌거나 URL 이
-틀린 것이다.
+Alertmanager 는 `slack_configs` 의 `title_link` 를 기본 템플릿으로 채운다
+(v0.26.0 `template/default.tmpl`): `slack.default.titlelink` → `__alertmanagerURL` →
+`{{ .ExternalURL }}/#/alerts?receiver=...`. `--web.external-url` 을 주지 않으면 `.ExternalURL`
+이 호스트명으로 채워져 `http://astra-monitoring:9093/#/alerts?receiver=orbit-default` 가 된다.
 
-`color` 의 `danger`/`good` 은 디스코드도 받아들인다(hex 로 바꿀 필요 없음). `channel`·`username`·
-`fallback`·`mrkdwn_in`, 빈 `text` 가 섞인 Alertmanager 실제 payload 도 그대로 통과하는 것을
-확인했다 — 즉 통지 실패를 만나면 payload 를 의심하기 전에 **엔드포인트와 파일 소유자**를 본다.
+실제 웹후크로 확인한 결과:
+
+| attachment 의 `title_link` | 응답 |
+|---|---|
+| `http://astra-monitoring:9093/#/alerts?receiver=orbit-default` | `400 {"attachments": ["0"]}` |
+| `""` (빈값) | `200 ok` |
+| `https://example.com/alerts` | `200 ok` |
+| `http://192.168.100.107:9093/#/alerts` | `200 ok` |
+
+그래서 `alertmanager.yml` 에 `title_link` 를 **IP 로 명시**한다 — 검증을 통과하면서 링크도
+살아 있다. `--web.external-url` 을 주는 방법도 되지만 그건 `/etc/default/prometheus-alertmanager`
+의 `ARGS` 라 **저장소 밖 상태**다. VM 을 다시 세우면서 빠뜨리면 이 400 이 조용히 돌아온다.
+
+`title_link: ''` 로 비워도 통지는 간다 (링크를 버리는 선택).
+
+이 실패는 `amtool check-config` 로 **안 잡힌다**. `journalctl` 에
+`notify retry canceled due to unrecoverable error` 로만 나오고, `unrecoverable` 이라
+재시도도 안 하므로 알림이 조용히 사라진다. 통지가 400 이면 **attachment 안의 URL 부터** 본다 —
+`color`(`danger`/`good`)·`channel`·`username`·`fallback`·`mrkdwn_in`·빈 `text` 는 디스코드가
+그대로 받는 것을 확인했다.
 
 채널을 바꿀 때는 `alertmanager.yml` 이 아니라 **웹후크를 다시 만들어** 파일 내용을 교체한다.
 디스코드 웹후크도 만들 때 고른 채널로 고정되고 payload 의 channel 은 무시한다.
