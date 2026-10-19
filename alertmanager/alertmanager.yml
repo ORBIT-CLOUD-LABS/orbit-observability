@@ -40,6 +40,16 @@ inhibit_rules:
       - severity = warning
     equal: [instance]
 
+  # HikariConnectionsPending 은 warning(> 10)·critical(> 100) 두 단계가 같은 alertname 이라
+  # (Runbook anchor 보존) 같은 Pod 에서 동시에 발화한다. 심각한 쪽만 남긴다.
+  - source_matchers:
+      - alertname = HikariConnectionsPending
+      - severity = critical
+    target_matchers:
+      - alertname = HikariConnectionsPending
+      - severity = warning
+    equal: [pod]
+
 receivers:
   # 디스코드로 통지한다. 블록이 slack_configs 인 것은 오타가 아니다:
   # VM 파일에 둔 URL 이 디스코드 웹후크의 **슬랙 호환 엔드포인트**(URL 끝에 /slack)라서,
